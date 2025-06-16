@@ -2,6 +2,8 @@ const net = require('net');
 const fs = require('fs');
 const path = require('path');
 const { buildHandshake } = require('./utils/handshake');
+const {app}= require('./api')
+
 const {
   sendChoke,
   sendUnchoke,
@@ -95,11 +97,19 @@ function tryNextPeer() {
     if (!peer.connected) {
       peer.connected = true;
   
-      // Send interested message after successful handshake
+      // Send interested message
       sendInterested(socket);
-    }
   
-    // Later: parse incoming messages and respond accordingly
+      //  Automatically unchoke this peer (pretending you're a seeder)
+      setTimeout(() => {
+        sendUnchoke(socket);
+      }, 1000);
+  
+      //  Choke them later (simulate bandwidth policy)
+      setTimeout(() => {
+        sendChoke(socket);
+      }, 8000);
+    }
   });
 
   socket.on('error', err => {

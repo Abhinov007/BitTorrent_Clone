@@ -11,7 +11,10 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "bencode": "^2.0.1",
     "buffer": "^6.0.3",
+    "express": "^5.1.0",
+    "express-fileupload": "^1.5.1",
     "parse-torrent": "^9.1.4"
   },
   "devDependencies": {
