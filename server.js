@@ -1,5 +1,8 @@
 const net = require('net');
 const fs = require('fs');
+const parseTorrent = require('./utils/torrentParser');
+const PieceManager = require('./utils/pieceSelector');
+const handlePeerWire = require('./peers/peerWire');
 const path = require('path');
 const { buildHandshake } = require('./utils/handshake');
 const {app}= require('./api')
@@ -16,6 +19,9 @@ const MAX_RETRIES = 2;
 const logPath = path.join(__dirname, 'logs/connections.log');
 fs.mkdirSync(path.dirname(logPath), { recursive: true });
 fs.writeFileSync(logPath, ''); // Clear previous logs
+
+const torrent = parseTorrent("ubuntu.torrent");
+const pieceManager = new PieceManager(torrent);
 
 
 const infoHash = '611f70899d4e1d6a9c39cfc925f103dfef630328'; // Ubuntu ISO test torrent
@@ -111,6 +117,11 @@ function tryNextPeer() {
       }, 8000);
     }
   });
+
+  const peerState = { bitfield: [], choked: true };
+  socket.on('data', data => {
+  handlePeerWire(socket, data, pieceManager, peerState);
+});
 
   socket.on('error', err => {
     logConnection(`❌ Error: ${peer.ip}:${peer.port} - ${err.message}`);

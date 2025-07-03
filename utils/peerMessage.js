@@ -21,7 +21,7 @@ function sendInterested(socket){
 }
 
 function sendUninterested(socket){
-    socket.write(createMessage(0));
+    socket.write(createMessage(3));
     console.log("Sent:Uninterested");
 }
 
