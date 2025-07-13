@@ -4,6 +4,7 @@ const parseTorrent = require('./utils/torrentParser');
 const getPeers = require('./utils/tracker');
 const path = require('path');
 const fs = require('fs');
+const pieceManager = require('./utils/pieceSelector');
 
 const PORT = 8000;
 const app = express();
@@ -14,6 +15,11 @@ const uploadPath = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadPath)) {
   fs.mkdirSync(uploadPath);
 }
+
+app.get('/api/status', (req, res) => {
+  const stats = pieceManager.getDownloadedStats();
+  res.json(stats);
+});
 
 app.get('/api/peers', (req, res) => {
   res.json({ message: "Use POST /api/peers to upload a .torrent file" });

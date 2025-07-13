@@ -1,47 +1,47 @@
-[2025-06-18T17:50:59.675Z] ✅ Connected to 2600:1702:4fb0:acdf:dacb:8aff:fe72:fac0:42070
-[2025-06-18T17:50:59.681Z] ✅ Connected to 2600:1702:4fb0:acdf:dacb:8aff:fe72:fac0:42070
-[2025-06-18T17:50:59.961Z] ❌ Error: 2600:1702:4fb0:acdf:dacb:8aff:fe72:fac0:42070 - read ECONNRESET
-[2025-06-18T17:50:59.979Z] 🔌 Closed: 2600:1702:4fb0:acdf:dacb:8aff:fe72:fac0:42070
-[2025-06-18T17:51:00.482Z] ✅ Connected to facepalm.jpe.gs:57070
-[2025-06-18T17:51:00.493Z] ✅ Connected to facepalm.jpe.gs:57070
-[2025-06-18T17:51:00.723Z] 🔌 Closed: facepalm.jpe.gs:57070
-[2025-06-18T17:51:00.743Z] 🔌 Closed: facepalm.jpe.gs:57070
-[2025-06-18T17:51:00.887Z] ❌ Error: distro-seeder-vm.vmbr1.hel1.moderateinfra.net:42787 - getaddrinfo ENOTFOUND distro-seeder-vm.vmbr1.hel1.moderateinfra.net
-[2025-06-18T17:51:00.888Z] 🔌 Closed: distro-seeder-vm.vmbr1.hel1.moderateinfra.net:42787
-[2025-06-18T17:51:00.890Z] ❌ Error: distro-seeder-vm.vmbr1.hel1.moderateinfra.net:42787 - getaddrinfo ENOTFOUND distro-seeder-vm.vmbr1.hel1.moderateinfra.net
-[2025-06-18T17:51:00.891Z] 🔌 Closed: distro-seeder-vm.vmbr1.hel1.moderateinfra.net:42787
-[2025-06-18T17:51:01.349Z] ✅ Connected to 2408:8276:3219:ff71::e2e:63219
-[2025-06-18T17:51:01.356Z] ✅ Connected to 2408:8276:3219:ff71::e2e:63219
-[2025-06-18T17:51:01.823Z] 🔌 Closed: 2408:8276:3219:ff71::e2e:63219
-[2025-06-18T17:51:01.974Z] ✅ Connected to 2001:bc8:1203:2b9::10:51413
-[2025-06-18T17:51:09.419Z] ⌛Timemeout: 2a00:23c7:acea:a801:c635:4a3a:11aa:e14c:49100
-[2025-06-18T17:51:09.420Z] ⌛Timemeout: 2a00:23c7:acea:a801:c635:4a3a:11aa:e14c:49100
-[2025-06-18T17:51:09.421Z] 🔌 Closed: 2a00:23c7:acea:a801:c635:4a3a:11aa:e14c:49100
-[2025-06-18T17:51:09.423Z] 🔌 Closed: 2a00:23c7:acea:a801:c635:4a3a:11aa:e14c:49100
-[2025-06-18T17:51:10.892Z] ⌛Timemeout: 2a00:1370:819a:5125:93f8:49b2:c0cb:c863:51413
-[2025-06-18T17:51:10.893Z] ⌛Timemeout: 2a00:1370:819a:5125:93f8:49b2:c0cb:c863:51413
-[2025-06-18T17:51:10.894Z] 🔌 Closed: 2a00:1370:819a:5125:93f8:49b2:c0cb:c863:51413
-[2025-06-18T17:51:10.895Z] 🔌 Closed: 2a00:1370:819a:5125:93f8:49b2:c0cb:c863:51413
-[2025-06-18T17:51:11.072Z] ✅ Connected to 2a00:6020:504e:9400:211:32ff:feb7:b351:51413
-[2025-06-18T17:51:11.099Z] ✅ Connected to 2a00:6020:504e:9400:211:32ff:feb7:b351:51413
-[2025-06-18T17:51:11.315Z] ❌ Error: 2a00:6020:504e:9400:211:32ff:feb7:b351:51413 - read ECONNRESET
-[2025-06-18T17:51:11.316Z] 🔌 Closed: 2a00:6020:504e:9400:211:32ff:feb7:b351:51413
-[2025-06-18T17:51:19.426Z] ⌛Timemeout: 2a01:e0a:d5b:2100::1:13249
-[2025-06-18T17:51:19.427Z] ⌛Timemeout: 2a01:e0a:d5b:2100::1:13249
-[2025-06-18T17:51:19.428Z] 🔌 Closed: 2a01:e0a:d5b:2100::1:13249
-[2025-06-18T17:51:19.428Z] 🔌 Closed: 2a01:e0a:d5b:2100::1:13249
-[2025-06-18T17:51:19.809Z] ⌛Timemeout: 2408:8276:3219:ff71::e2e:63219
-[2025-06-18T17:51:19.810Z] 🔌 Closed: 2408:8276:3219:ff71::e2e:63219
-[2025-06-18T17:51:19.951Z] ⌛Timemeout: 2600:1702:4fb0:acdf:dacb:8aff:fe72:fac0:42070
-[2025-06-18T17:51:19.952Z] 🔌 Closed: 2600:1702:4fb0:acdf:dacb:8aff:fe72:fac0:42070
-[2025-06-18T17:51:21.318Z] ⌛Timemeout: 2a01:e0a:204:18e0:55d2:6bc9:1efe:7099:14934
-[2025-06-18T17:51:21.319Z] ⌛Timemeout: 2a01:e0a:204:18e0:55d2:6bc9:1efe:7099:14934
-[2025-06-18T17:51:21.322Z] 🔌 Closed: 2a01:e0a:204:18e0:55d2:6bc9:1efe:7099:14934
-[2025-06-18T17:51:21.323Z] 🔌 Closed: 2a01:e0a:204:18e0:55d2:6bc9:1efe:7099:14934
-[2025-06-18T17:51:22.928Z] ⌛Timemeout: 2001:bc8:1203:2b9::10:51413
-[2025-06-18T17:51:22.929Z] 🔌 Closed: 2001:bc8:1203:2b9::10:51413
-[2025-06-18T17:51:24.437Z] ❌ Error: 2a01:e0a:352:2450:211:32ff:fed8:cacb:63810 - connect ECONNREFUSED 2a01:e0a:352:2450:211:32ff:fed8:cacb:63810
-[2025-06-18T17:51:24.438Z] 🔌 Closed: 2a01:e0a:352:2450:211:32ff:fed8:cacb:63810
-[2025-06-18T17:51:24.440Z] ❌ Error: 2a01:e0a:352:2450:211:32ff:fed8:cacb:63810 - connect ECONNREFUSED 2a01:e0a:352:2450:211:32ff:fed8:cacb:63810
-[2025-06-18T17:51:24.441Z] 🔌 Closed: 2a01:e0a:352:2450:211:32ff:fed8:cacb:63810
-[2025-06-18T17:51:24.624Z] ✅ Connected to 2a06.4004.c200.0000.0000.0000.0000.0015.static6.kviknet.net:51413
+[2025-07-06T16:31:08.792Z] ⌛Timemeout: 2600:1702:4fb0:acdf:dacb:8aff:fe72:fac0:42070
+[2025-07-06T16:31:08.798Z] ⌛Timemeout: 2600:1702:4fb0:acdf:dacb:8aff:fe72:fac0:42070
+[2025-07-06T16:31:08.799Z] ⌛Timemeout: 2a00:23c7:acea:a801:c635:4a3a:11aa:e14c:49100
+[2025-07-06T16:31:08.801Z] ⌛Timemeout: 2a00:23c7:acea:a801:c635:4a3a:11aa:e14c:49100
+[2025-07-06T16:31:08.803Z] 🔌 Closed: 2a00:23c7:acea:a801:c635:4a3a:11aa:e14c:49100
+[2025-07-06T16:31:08.820Z] 🔌 Closed: 2a00:23c7:acea:a801:c635:4a3a:11aa:e14c:49100
+[2025-07-06T16:31:08.821Z] 🔌 Closed: 2600:1702:4fb0:acdf:dacb:8aff:fe72:fac0:42070
+[2025-07-06T16:31:08.821Z] 🔌 Closed: 2600:1702:4fb0:acdf:dacb:8aff:fe72:fac0:42070
+[2025-07-06T16:31:10.120Z] ❌ Error: distro-seeder-vm.vmbr1.hel1.moderateinfra.net:42787 - getaddrinfo ENOTFOUND distro-seeder-vm.vmbr1.hel1.moderateinfra.net
+[2025-07-06T16:31:10.121Z] 🔌 Closed: distro-seeder-vm.vmbr1.hel1.moderateinfra.net:42787
+[2025-07-06T16:31:10.122Z] ❌ Error: distro-seeder-vm.vmbr1.hel1.moderateinfra.net:42787 - getaddrinfo ENOTFOUND distro-seeder-vm.vmbr1.hel1.moderateinfra.net
+[2025-07-06T16:31:10.123Z] 🔌 Closed: distro-seeder-vm.vmbr1.hel1.moderateinfra.net:42787
+[2025-07-06T16:31:10.320Z] ✅ Connected to facepalm.jpe.gs:57070
+[2025-07-06T16:31:10.367Z] ✅ Connected to facepalm.jpe.gs:57070
+[2025-07-06T16:31:10.602Z] 🔌 Closed: facepalm.jpe.gs:57070
+[2025-07-06T16:31:10.632Z] 🔌 Closed: facepalm.jpe.gs:57070
+[2025-07-06T16:31:10.750Z] ✅ Connected to 2001:bc8:1203:2b9::10:51413
+[2025-07-06T16:31:10.790Z] ✅ Connected to 2001:bc8:1203:2b9::10:51413
+[2025-07-06T16:31:10.947Z] ❌ Error: 2001:bc8:1203:2b9::10:51413 - read ECONNRESET
+[2025-07-06T16:31:10.950Z] 🔌 Closed: 2001:bc8:1203:2b9::10:51413
+[2025-07-06T16:31:14.021Z] ❌ Error: 2a01:e0a:d5b:2100::1:13249 - connect ECONNREFUSED 2a01:e0a:d5b:2100::1:13249
+[2025-07-06T16:31:14.023Z] 🔌 Closed: 2a01:e0a:d5b:2100::1:13249
+[2025-07-06T16:31:14.033Z] ❌ Error: 2a01:e0a:d5b:2100::1:13249 - connect ECONNREFUSED 2a01:e0a:d5b:2100::1:13249
+[2025-07-06T16:31:14.034Z] 🔌 Closed: 2a01:e0a:d5b:2100::1:13249
+[2025-07-06T16:31:14.191Z] ✅ Connected to 2a00:6020:504e:9400:211:32ff:feb7:b351:51413
+[2025-07-06T16:31:14.197Z] ✅ Connected to 2a00:6020:504e:9400:211:32ff:feb7:b351:51413
+[2025-07-06T16:31:14.386Z] ❌ Error: 2a00:6020:504e:9400:211:32ff:feb7:b351:51413 - read ECONNRESET
+[2025-07-06T16:31:14.388Z] 🔌 Closed: 2a00:6020:504e:9400:211:32ff:feb7:b351:51413
+[2025-07-06T16:31:20.130Z] ⌛Timemeout: 2408:8276:3219:ff71::e2e:63219
+[2025-07-06T16:31:20.132Z] ⌛Timemeout: 2408:8276:3219:ff71::e2e:63219
+[2025-07-06T16:31:20.134Z] ⌛Timemeout: 2a00:1370:819a:5125:93f8:49b2:c0cb:c863:51413
+[2025-07-06T16:31:20.135Z] ⌛Timemeout: 2a00:1370:819a:5125:93f8:49b2:c0cb:c863:51413
+[2025-07-06T16:31:20.136Z] 🔌 Closed: 2a00:1370:819a:5125:93f8:49b2:c0cb:c863:51413
+[2025-07-06T16:31:20.138Z] 🔌 Closed: 2a00:1370:819a:5125:93f8:49b2:c0cb:c863:51413
+[2025-07-06T16:31:20.140Z] 🔌 Closed: 2408:8276:3219:ff71::e2e:63219
+[2025-07-06T16:31:20.142Z] 🔌 Closed: 2408:8276:3219:ff71::e2e:63219
+[2025-07-06T16:31:20.352Z] ✅ Connected to 2a01:e0a:352:2450:211:32ff:fed8:cacb:63810
+[2025-07-06T16:31:20.354Z] ✅ Connected to 2a01:e0a:352:2450:211:32ff:fed8:cacb:63810
+[2025-07-06T16:31:20.565Z] 🔌 Closed: 2a01:e0a:352:2450:211:32ff:fed8:cacb:63810
+[2025-07-06T16:31:24.035Z] ⌛Timemeout: 2a01:e0a:204:18e0:55d2:6bc9:1efe:7099:14934
+[2025-07-06T16:31:24.036Z] ⌛Timemeout: 2a01:e0a:204:18e0:55d2:6bc9:1efe:7099:14934
+[2025-07-06T16:31:24.038Z] 🔌 Closed: 2a01:e0a:204:18e0:55d2:6bc9:1efe:7099:14934
+[2025-07-06T16:31:24.039Z] 🔌 Closed: 2a01:e0a:204:18e0:55d2:6bc9:1efe:7099:14934
+[2025-07-06T16:31:24.396Z] ⌛Timemeout: 2607:fea8:fdf0:825b:5ba3:d3d7:a975:379:51413
+[2025-07-06T16:31:24.398Z] ⌛Timemeout: 2607:fea8:fdf0:825b:5ba3:d3d7:a975:379:51413
+[2025-07-06T16:31:24.399Z] 🔌 Closed: 2607:fea8:fdf0:825b:5ba3:d3d7:a975:379:51413
+[2025-07-06T16:31:24.401Z] 🔌 Closed: 2607:fea8:fdf0:825b:5ba3:d3d7:a975:379:51413

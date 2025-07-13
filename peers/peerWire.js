@@ -1,9 +1,10 @@
 const fs = require('fs');
 const path = require('path');
 
+// Constructs a request message for a block
 function sendRequest(socket, index, begin = 0, length = 16384) {
   const msg = Buffer.alloc(17);
-  msg.writeUInt32BE(13, 0); // length of payload
+  msg.writeUInt32BE(13, 0); // Payload length
   msg.writeUInt8(6, 4);     // ID = 6 (request)
   msg.writeUInt32BE(index, 5);
   msg.writeUInt32BE(begin, 9);
@@ -29,11 +30,9 @@ module.exports = function handlePeerWire(socket, data, pieceManager, peerState =
       peerState.choked = false;
       console.log("🔓 Peer unchoked us.");
 
-      {
-        const req = pieceManager.nextBlockRequest(peerState.bitfield);
-        if (req) {
-          sendRequest(socket, req.index, req.begin, req.length);
-        }
+      const nextReq = pieceManager.nextBlockRequest(peerState.bitfield);
+      if (nextReq) {
+        sendRequest(socket, nextReq.index, nextReq.begin, nextReq.length);
       }
       break;
 
@@ -57,7 +56,7 @@ module.exports = function handlePeerWire(socket, data, pieceManager, peerState =
         }
 
         peerState.bitfield = bitfield;
-        console.log(`🧠 Bitfield received from peer`);
+        console.log("🧠 Bitfield received");
 
         const req = pieceManager.nextBlockRequest(bitfield);
         if (!peerState.choked && req) {
@@ -82,23 +81,24 @@ module.exports = function handlePeerWire(socket, data, pieceManager, peerState =
         if (pieceManager.isPieceComplete(index)) {
           const pieceBuffer = pieceManager.assemblePiece(index);
           if (pieceManager.verifyPiece(index, pieceBuffer)) {
-            const downloadPath = path.join(__dirname, '..', 'downloads', pieceManager.torrent.name);
-            fs.mkdirSync(path.dirname(downloadPath), { recursive: true });
-            const offset = index * pieceManager.torrent.info['piece length'];
-            const fd = fs.openSync(downloadPath, 'r+');
+            const filePath = path.join(__dirname, '..', 'downloads', pieceManager.torrent.name);
+            fs.mkdirSync(path.dirname(filePath), { recursive: true });
+
+            const offset = index * pieceManager.pieceLength;
+            const fd = fs.openSync(filePath, 'r+');
             fs.writeSync(fd, pieceBuffer, 0, pieceBuffer.length, offset);
             fs.closeSync(fd);
 
             console.log(`✅ Piece ${index} verified and saved at offset ${offset}`);
           } else {
             console.log(`❌ Piece ${index} failed hash check`);
-            pieceManager.resetPiece(index); // to redownload
+            pieceManager.resetPiece(index); // clear blocks and retry
           }
         }
 
-        const req = pieceManager.nextBlockRequest(peerState.bitfield);
-        if (!peerState.choked && req) {
-          sendRequest(socket, req.index, req.begin, req.length);
+        const next = pieceManager.nextBlockRequest(peerState.bitfield);
+        if (!peerState.choked && next) {
+          sendRequest(socket, next.index, next.begin, next.length);
         }
       }
       break;

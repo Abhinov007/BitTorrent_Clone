@@ -5,67 +5,69 @@ class PieceManager {
     this.torrent = torrent;
     this.pieceLength = torrent.pieceLength;
     this.totalLength = torrent.length;
+    this.blockSize = 16384; // 16KB block size
 
     if (!this.pieceLength || !this.totalLength) {
       throw new Error(`Invalid torrent metadata`);
     }
 
     this.totalPieces = Math.ceil(this.totalLength / this.pieceLength);
-    this.blockSize = 16384; // 16 KB
 
-    this.pieces = new Array(this.totalPieces).fill(null).map((_, index) => ({
+    this.pieces = Array.from({ length: this.totalPieces }, (_, index) => ({
       index,
       requestedBlocks: [],
       receivedBlocks: [],
-      received: false,
-      requested: false
+      received: false
     }));
 
-    // Parse expected SHA1 hashes
-    const pieceBuffer = torrent.pieces;
+    // SHA1 hashes from torrent.pieces buffer
+    const buffer = torrent.pieces;
     this.expectedHashes = [];
-    for (let i = 0; i < pieceBuffer.length; i += 20) {
-      this.expectedHashes.push(pieceBuffer.slice(i, i + 20));
+    for (let i = 0; i < buffer.length; i += 20) {
+      this.expectedHashes.push(buffer.slice(i, i + 20));
     }
 
     if (this.expectedHashes.length !== this.totalPieces) {
-      throw new Error(`Mismatch: hashes=${this.expectedHashes.length}, pieces=${this.totalPieces}`);
+      throw new Error(`Mismatch: ${this.expectedHashes.length} hashes for ${this.totalPieces} pieces`);
     }
   }
 
   /**
-   * Returns next block that is available in peer's bitfield.
+   * Chooses the next block to request from a peer based on its bitfield.
    */
-  nextBlockRequest(bitfield) {
-    for (const piece of this.pieces) {
-      if (piece.received || !bitfield?.[piece.index]) continue;
+nextBlockRequest(bitfield) {
+  for (const piece of this.pieces) {
+    if (piece.received || !bitfield?.[piece.index]) continue;
 
-      const blocksNeeded = this.getMissingBlocks(piece.index);
-      if (blocksNeeded.length === 0) continue;
+    const blocksNeeded = this.getMissingBlocks(piece.index);
 
-      const block = blocksNeeded[0];
-      piece.requestedBlocks.push(block.begin); // Mark block as requested
-      return { index: piece.index, begin: block.begin, length: block.length };
+    for (const block of blocksNeeded) {
+      if (!piece.requestedBlocks.includes(block.begin)) {
+        piece.requestedBlocks.push(block.begin); // Mark block
+        return { index: piece.index, begin: block.begin, length: block.length };
+      }
     }
-
-    return null;
   }
+  return null;
+}
 
   /**
-   * Determine which blocks of a piece are still needed.
+   * Finds blocks that are not yet requested or received.
    */
   getMissingBlocks(index) {
-    const pieceLength = this.getPieceLength(index);
-    const totalBlocks = Math.ceil(pieceLength / this.blockSize);
     const piece = this.pieces[index];
-    const requested = piece.requestedBlocks;
-    const received = piece.receivedBlocks.map(b => b.offset);
+    const pieceLen = this.getPieceLength(index);
+    const totalBlocks = Math.ceil(pieceLen / this.blockSize);
+
+    const requestedOffsets = piece.requestedBlocks.map(b => b.offset);
+    const receivedOffsets = piece.receivedBlocks.map(b => b.offset);
 
     const missing = [];
     for (let i = 0; i < totalBlocks; i++) {
       const begin = i * this.blockSize;
-      const length = Math.min(this.blockSize, pieceLength - begin);
-      if (!requested.includes(begin) && !received.includes(begin)) {
+      const length = Math.min(this.blockSize, pieceLen - begin);
+
+      if (!requestedOffsets.includes(begin) && !receivedOffsets.includes(begin)) {
         missing.push({ begin, length });
       }
     }
@@ -74,30 +76,30 @@ class PieceManager {
   }
 
   /**
-   * Save block data at given offset.
+   * Saves a downloaded block.
    */
   saveBlock(index, begin, data) {
     const piece = this.pieces[index];
     if (!piece) return;
 
-    const already = piece.receivedBlocks.find(b => b.offset === begin);
-    if (!already) {
+    const alreadyExists = piece.receivedBlocks.some(b => b.offset === begin);
+    if (!alreadyExists) {
       piece.receivedBlocks.push({ offset: begin, data });
     }
   }
 
   /**
-   * Check if full piece is received.
+   * Checks if all blocks for a piece are received.
    */
   isPieceComplete(index) {
-    const pieceLength = this.getPieceLength(index);
     const piece = this.pieces[index];
-    const totalReceived = piece.receivedBlocks.reduce((sum, b) => sum + b.data.length, 0);
-    return totalReceived >= pieceLength;
+    const expectedLength = this.getPieceLength(index);
+    const receivedLength = piece.receivedBlocks.reduce((acc, b) => acc + b.data.length, 0);
+    return receivedLength >= expectedLength;
   }
 
   /**
-   * Combine all blocks into one piece buffer.
+   * Concatenates all received blocks for a piece in order.
    */
   assemblePiece(index) {
     const piece = this.pieces[index];
@@ -106,13 +108,14 @@ class PieceManager {
   }
 
   /**
-   * Validate piece hash.
+   * Verifies a piece's SHA1 hash.
    */
   verifyPiece(index, buffer) {
     const expected = this.expectedHashes[index];
     const actual = crypto.createHash('sha1').update(buffer).digest();
 
-    if (expected.equals(actual)) {
+    const isValid = expected.equals(actual);
+    if (isValid) {
       this.pieces[index].received = true;
       return true;
     } else {
@@ -122,7 +125,7 @@ class PieceManager {
   }
 
   /**
-   * Reset piece download progress (on failure).
+   * Resets a piece's requested and received blocks for retry.
    */
   resetPiece(index) {
     const piece = this.pieces[index];
@@ -132,19 +135,37 @@ class PieceManager {
   }
 
   /**
-   * Length of the piece (last one may be shorter)
+   * Gets the actual byte size of a given piece index.
    */
   getPieceLength(index) {
     if (index < this.totalPieces - 1) return this.pieceLength;
-    return this.totalLength - index * this.pieceLength;
+    return this.totalLength - (index * this.pieceLength);
   }
 
   /**
-   * Whether all pieces are downloaded.
+   * Checks if all pieces have been received and verified.
    */
   isDone() {
     return this.pieces.every(p => p.received);
   }
+
+   /**
+   * Shows download status.
+   */
+  getDownloadedStats() {
+  let downloaded = 0;
+
+  this.pieces.forEach(piece => {
+    downloaded += piece.receivedBlocks.reduce((sum, block) => sum + block.data.length, 0);
+  });
+
+  return {
+    downloaded,
+    total: this.totalLength,
+    percent: ((downloaded / this.totalLength) * 100).toFixed(2)
+  };
+}
+
 }
 
 module.exports = PieceManager;
