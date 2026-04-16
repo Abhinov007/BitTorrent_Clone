@@ -31,6 +31,8 @@ class PieceManager {
     if (this.expectedHashes.length !== this.totalPieces) {
       throw new Error(`Mismatch: ${this.expectedHashes.length} hashes for ${this.totalPieces} pieces`);
     }
+
+    this.downloadedBytes = 0; // incremental counter — avoids looping all blocks on every stat call
   }
 
   /**
@@ -86,6 +88,7 @@ nextBlockRequest(bitfield) {
     const alreadyExists = piece.receivedBlocks.some(b => b.offset === begin);
     if (!alreadyExists) {
       piece.receivedBlocks.push({ offset: begin, data });
+      this.downloadedBytes += data.length; // keep running total up to date
     }
   }
 
@@ -154,18 +157,12 @@ nextBlockRequest(bitfield) {
    * Shows download status.
    */
   getDownloadedStats() {
-  let downloaded = 0;
-
-  this.pieces.forEach(piece => {
-    downloaded += piece.receivedBlocks.reduce((sum, block) => sum + block.data.length, 0);
-  });
-
-  return {
-    downloaded,
-    total: this.totalLength,
-    percent: ((downloaded / this.totalLength) * 100).toFixed(2)
-  };
-}
+    return {
+      downloaded: this.downloadedBytes,
+      total: this.totalLength,
+      percent: ((this.downloadedBytes / this.totalLength) * 100).toFixed(2)
+    };
+  }
 
 }
 

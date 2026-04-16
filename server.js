@@ -99,7 +99,7 @@ function tryNextPeer() {
 
 
 // AFTER (one handler — correct)
-const peerState = { bitfield: [], choked: true };
+const peerState = { bitfield: [], choked: true, inFlight: new Set() };
 
 socket.on('data', data => {
   if (!peer.connected) {
@@ -125,7 +125,7 @@ socket.on('data', data => {
   });
 
   socket.setTimeout(10000, () => {
-    logConnection(`⌛Timemeout: ${peer.ip}:${peer.port}`);
+    logConnection(`⌛Timeout: ${peer.ip}:${peer.port}`);
     socket.destroy();
   });
 }

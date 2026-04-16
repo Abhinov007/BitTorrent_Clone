@@ -28,51 +28,69 @@ function buildTrackerUrl(torrent, peerId, port = 6881) {
   return `${urlObj.origin}${urlObj.pathname}?${query}`;
 }
 
+function fetchWithRetry(url, retries, delay, callback) {
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(url);
+  } catch (err) {
+    return callback(new Error(`Invalid tracker URL: ${err.message}`), null);
+  }
+
+  const protocol = parsedUrl.protocol === 'https:' ? https : http;
+
+  protocol.get(url, (res) => {
+    const chunks = [];
+    res.on('data', chunk => chunks.push(chunk));
+    res.on('end', () => callback(null, Buffer.concat(chunks)));
+  }).on('error', (err) => {
+    if (retries > 0) {
+      console.warn(`⚠️ Tracker request failed, retrying in ${delay}ms... (${retries} left)`);
+      setTimeout(() => fetchWithRetry(url, retries - 1, delay * 2, callback), delay);
+    } else {
+      callback(err, null);
+    }
+  });
+}
+
 function getPeers(torrent, callback) {
   try {
     const trackerUrl = buildTrackerUrl(torrent, torrent.peerId);
-    const parsedUrl = new URL(trackerUrl);
-    const protocol = parsedUrl.protocol === 'https:' ? https : http;
 
-    protocol.get(trackerUrl, (res) => {
-      const chunks = [];
+    fetchWithRetry(trackerUrl, 3, 1000, (err, response) => {
+      if (err) {
+        console.error('❌ Tracker failed after all retries:', err.message);
+        return callback([]);
+      }
 
-      res.on('data', (chunk) => chunks.push(chunk));
-      res.on('end', () => {
-        try {
-          const response = Buffer.concat(chunks);
-          const trackerData = bencode.decode(response);
+      try {
+        const trackerData = bencode.decode(response);
 
-          if (!trackerData.peers) {
-            console.error('Tracker response missing peers field');
-            return callback([]);
-          }
-
-          let peers;
-
-          if (Buffer.isBuffer(trackerData.peers)) {
-            // Compact peer list
-            peers = parsePeers(trackerData.peers);
-          } else if (Array.isArray(trackerData.peers)) {
-            // Dictionary peer list (not common, but supported)
-            peers = trackerData.peers.map(p => ({
-              ip: p.ip.toString(),
-              port: p.port
-            }));
-          } else {
-            console.error('Unexpected peers format from tracker');
-            return callback([]);
-          }
-
-          callback(peers);
-        } catch (e) {
-          console.error('Error decoding tracker response:', e.message);
-          callback([]);
+        if (!trackerData.peers) {
+          console.error('Tracker response missing peers field');
+          return callback([]);
         }
-      });
-    }).on('error', (err) => {
-      console.error('Error communicating with tracker:', err.message);
-      callback([]);
+
+        let peers;
+
+        if (Buffer.isBuffer(trackerData.peers)) {
+          // Compact peer list
+          peers = parsePeers(trackerData.peers);
+        } else if (Array.isArray(trackerData.peers)) {
+          // Dictionary peer list (not common, but supported)
+          peers = trackerData.peers.map(p => ({
+            ip: p.ip.toString(),
+            port: p.port
+          }));
+        } else {
+          console.error('Unexpected peers format from tracker');
+          return callback([]);
+        }
+
+        callback(peers);
+      } catch (e) {
+        console.error('Error decoding tracker response:', e.message);
+        callback([]);
+      }
     });
   } catch (err) {
     console.error('Invalid tracker URL:', err.message);
