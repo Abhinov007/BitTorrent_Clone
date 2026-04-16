@@ -1,11 +1,12 @@
 const crypto = require('crypto');
+const { BLOCK_SIZE } = require('../config');
 
 class PieceManager {
   constructor(torrent) {
     this.torrent = torrent;
     this.pieceLength = torrent.pieceLength;
     this.totalLength = torrent.length;
-    this.blockSize = 16384; // 16KB block size
+    this.blockSize = BLOCK_SIZE;
 
     if (!this.pieceLength || !this.totalLength) {
       throw new Error(`Invalid torrent metadata`);
@@ -59,7 +60,7 @@ nextBlockRequest(bitfield) {
     const pieceLen = this.getPieceLength(index);
     const totalBlocks = Math.ceil(pieceLen / this.blockSize);
 
-    const requestedOffsets = piece.requestedBlocks.map(b => b.offset);
+    const requestedOffsets = piece.requestedBlocks;
     const receivedOffsets = piece.receivedBlocks.map(b => b.offset);
 
     const missing = [];

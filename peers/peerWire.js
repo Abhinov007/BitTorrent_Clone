@@ -81,11 +81,11 @@ module.exports = function handlePeerWire(socket, data, pieceManager, peerState =
         if (pieceManager.isPieceComplete(index)) {
           const pieceBuffer = pieceManager.assemblePiece(index);
           if (pieceManager.verifyPiece(index, pieceBuffer)) {
-            const filePath = path.join(__dirname, '..', 'downloads', pieceManager.torrent.name);
+            const filePath = path.join(__dirname, '..', 'downloads', pieceManager.torrent.names);
             fs.mkdirSync(path.dirname(filePath), { recursive: true });
 
             const offset = index * pieceManager.pieceLength;
-            const fd = fs.openSync(filePath, 'r+');
+            const fd = fs.openSync(filePath, 'a+');
             fs.writeSync(fd, pieceBuffer, 0, pieceBuffer.length, offset);
             fs.closeSync(fd);
 

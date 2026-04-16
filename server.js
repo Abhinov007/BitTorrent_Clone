@@ -5,7 +5,8 @@ const PieceManager = require('./utils/pieceSelector');
 const handlePeerWire = require('./peers/peerWire');
 const path = require('path');
 const { buildHandshake } = require('./utils/handshake');
-const {app}= require('./api')
+const { MAX_CONNECTIONS, MAX_RETRIES } = require('./config');
+
 
 const {
   sendChoke,
@@ -13,8 +14,7 @@ const {
   sendInterested,
   sendNotInterested
 } = require('./utils/peerMessage');
-const MAX_CONNECTIONS = 4;
-const MAX_RETRIES = 2;
+
 
 const logPath = path.join(__dirname, 'logs/connections.log');
 fs.mkdirSync(path.dirname(logPath), { recursive: true });
@@ -97,29 +97,17 @@ function tryNextPeer() {
     socket.write(handshake);
   });
 
-  socket.on('data', data => {
-    console.log(`Received from ${peer.ip}:${peer.port}:`, data.toString('hex').slice(0, 40), '...');
-  
-    if (!peer.connected) {
-      peer.connected = true;
-  
-      // Send interested message
-      sendInterested(socket);
-  
-      //  Automatically unchoke this peer (pretending you're a seeder)
-      setTimeout(() => {
-        sendUnchoke(socket);
-      }, 1000);
-  
-      //  Choke them later (simulate bandwidth policy)
-      setTimeout(() => {
-        sendChoke(socket);
-      }, 8000);
-    }
-  });
 
-  const peerState = { bitfield: [], choked: true };
-  socket.on('data', data => {
+// AFTER (one handler — correct)
+const peerState = { bitfield: [], choked: true };
+
+socket.on('data', data => {
+  if (!peer.connected) {
+    peer.connected = true;
+    sendInterested(socket);   // tell peer we want data
+    // DO NOT send unchoke here — wait for peer's UNCHOKE message
+  }
+
   handlePeerWire(socket, data, pieceManager, peerState);
 });
 
@@ -142,7 +130,15 @@ function tryNextPeer() {
   });
 }
 
-// Start connections
-for (let i = 0; i < 10; i++) {
-  tryNextPeer();
+// server.js — wrap the bottom block in a function and export it
+
+function startDownload(torrentPath) {
+  const torrent = parseTorrent(torrentPath);
+  const pieceManager = new PieceManager(torrent);
+
+  for (let i = 0; i < MAX_CONNECTIONS; i++) {
+    tryNextPeer();
+  }
 }
+
+module.exports = { startDownload };
