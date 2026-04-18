@@ -6,6 +6,7 @@ const path = require('path');
 const fs = require('fs');
 const pieceManager = require('./utils/pieceSelector');
 const { startDownload } = require('./server');
+const { magnetToTorrent } = require('./utils/magnetHandler');
 const crypto = require('crypto');
 const { PORT, UPLOAD_PATH, DOWNLOAD_PATH, PROWLARR_URL, PROWLARR_API_KEY, SEARCH_LIMIT } = require('./config');
 const axios = require('axios');
@@ -89,8 +90,9 @@ app.get('/api/search', async (req, res) => {
         size:       r.size,
         seeders:    r.seeders,
         leechers:   r.leechers,
-        magnetLink: r.magnetUrl    || null,
-        torrentUrl: r.downloadUrl  || null,
+        infoHash:   r.infoHash    || null,
+        magnetLink: (r.magnetUrl && r.magnetUrl.startsWith('magnet:')) ? r.magnetUrl : null,
+        torrentUrl: r.downloadUrl || (r.magnetUrl && !r.magnetUrl.startsWith('magnet:') ? r.magnetUrl : null) || null,
         source:     r.indexer      || 'unknown'
       }))
       .filter(r => r.torrentUrl || r.magnetLink)
@@ -116,9 +118,27 @@ app.post('/api/download/url', async (req, res) => {
     // Fetch the .torrent file from the URL
     const response = await axios.get(torrentUrl, {
       responseType: 'arraybuffer',
-      timeout: 10000,
-      headers: { 'User-Agent': 'Mozilla/5.0' } // some sites reject non-browser requests
+      timeout: 30000, // increased to 30s — Prowlarr proxy can be slow
+      maxRedirects: 5, // follow redirects from indexers
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/x-bittorrent, */*'
+      } // some sites reject non-browser requests
     });
+
+    if (!response.data || response.data.byteLength === 0) {
+      return res.status(500).json({ error: 'Empty response from indexer' });
+    }
+
+    // Check if response is a magnet link instead of a .torrent file (YTS does this)
+    const bodyText = Buffer.from(response.data).toString('utf8', 0, 100).trim();
+    if (bodyText.startsWith('magnet:')) {
+      const magnet = Buffer.from(response.data).toString('utf8').trim();
+      console.log('🔁 URL resolved to magnet link, switching to DHT handler...');
+      const torrent = await magnetToTorrent(magnet);
+      startDownload(torrent);
+      return res.json({ message: 'Download started via magnet', name: torrent.name });
+    }
 
     // Save with a random name
     const randomName = crypto.randomBytes(16).toString('hex') + '.torrent';
@@ -133,7 +153,64 @@ app.post('/api/download/url', async (req, res) => {
 
   } catch (err) {
     console.error('Download error:', err.message);
-    res.status(500).json({ error: 'Failed to fetch or start download' });
+
+        // Prowlarr redirected to a magnet: URI — axios can't follow it, extract from error
+        if (err.message && err.message.includes('magnet:')) {
+          const magnetMatch = err.message.match(/(magnet:[^\s"]+)/);
+          if (magnetMatch) {
+            console.log('🔁 Caught magnet redirect, switching to magnet handler...');
+            try {
+              const torrent = await magnetToTorrent(magnetMatch[1]);
+              startDownload(torrent);
+              return res.json({ message: 'Download started via magnet', name: torrent.name });
+            } catch (magnetErr) {
+              return res.status(500).json({ error: 'Magnet fallback failed: ' + magnetErr.message });
+            }
+          }
+        }
+        
+    if (err.response) {
+      // Server responded with error status
+      return res.status(502).json({
+        error: `Indexer returned ${err.response.status} — try a different result`,
+      });
+    }
+    if (err.code === 'ECONNABORTED') {
+      return res.status(504).json({ error: 'Request timed out — indexer is too slow, try another result' });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/download/hash', async (req, res) => {
+  const { infoHash, title } = req.body;
+
+  if (!infoHash) {
+    return res.status(400).json({ error: 'infoHash is required' });
+  }
+
+  // Build a magnet link from the info hash + known public trackers
+  const trackers = [
+    'http://tracker.opentrackr.org:1337/announce',
+    'http://open.tracker.cl:1337/announce',
+    'http://tracker.openbittorrent.com:80/announce',
+    'http://tracker.internetwarriors.net:1337/announce',
+    'udp://tracker.opentrackr.org:1337/announce',
+    'udp://open.stealth.si:80/announce',
+  ].map(t => `&tr=${encodeURIComponent(t)}`).join('');
+
+  const dn = title ? `&dn=${encodeURIComponent(title)}` : '';
+  const magnetLink = `magnet:?xt=urn:btih:${infoHash}${dn}${trackers}`;
+
+  console.log(`🔑 Starting download from infoHash: ${infoHash}`);
+
+  try {
+    res.json({ message: 'Fetching metadata via DHT...', infoHash });
+    const torrent = await magnetToTorrent(magnetLink);
+    startDownload(torrent);
+    console.log(`✅ Download started: ${torrent.name}`);
+  } catch (err) {
+    console.error('Hash download error:', err.message);
   }
 });
 
