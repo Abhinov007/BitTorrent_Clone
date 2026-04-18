@@ -9,4 +9,7 @@ module.exports = {
   SOCKET_TIMEOUT:  parseInt(process.env.SOCKET_TIMEOUT)  || 10000,
   UPLOAD_PATH:     process.env.UPLOAD_PATH               || './uploads',
   DOWNLOAD_PATH:   process.env.DOWNLOAD_PATH             || './downloads',
+  PROWLARR_URL:    process.env.PROWLARR_URL              || 'http://localhost:9696',
+  PROWLARR_API_KEY: process.env.PROWLARR_API_KEY         || '',
+  SEARCH_LIMIT:    parseInt(process.env.SEARCH_LIMIT)    || 20,
 };
