@@ -47,12 +47,60 @@ function magnetToTorrent(magnetUri) {
     // 2. Find peers — try HTTP trackers first, fall back to DHT
     const allTrackers = [...(trackers.filter(t => t.startsWith('http'))), ...FALLBACK_HTTP_TRACKERS];
 
+    const MAX_ROUNDS = 3;  // how many peer-fetch + metadata-attempt rounds before giving up
+    let round = 0;
+    let triedDHT = false;
+    let usedPeers = new Set(); // avoid retrying the same peers
+
+    function nextRound() {
+      round++;
+      if (round > MAX_ROUNDS) {
+        return reject(new Error('Could not fetch torrent metadata after multiple attempts'));
+      }
+
+      console.log(`🔄 Peer retry round ${round}/${MAX_ROUNDS}...`);
+
+      if (!triedDHT) {
+        // Re-query trackers for a fresh peer list
+        findPeersViaTrackers(infoHashBuffer, allTrackers, (freshPeers) => {
+          const newPeers = freshPeers.filter(p => !usedPeers.has(`${p.host}:${p.port}`));
+          if (newPeers.length > 0) {
+            console.log(`👥 Round ${round}: got ${newPeers.length} fresh tracker peers`);
+            proceedWithPeers(newPeers);
+          } else {
+            // No new tracker peers — try DHT
+            triedDHT = true;
+            console.log('⚠️ No new tracker peers, trying DHT...');
+            findPeersViaDHT(infoHashBuffer, (err, dhtPeers) => {
+              if (err || dhtPeers.length === 0) {
+                return reject(new Error('Could not find any peers via trackers or DHT'));
+              }
+              const newDHTPeers = dhtPeers.filter(p => !usedPeers.has(`${p.host}:${p.port}`));
+              console.log(`👥 Round ${round}: got ${newDHTPeers.length} DHT peers`);
+              proceedWithPeers(newDHTPeers.length > 0 ? newDHTPeers : dhtPeers);
+            });
+          }
+        });
+      } else {
+        // Already tried DHT, just retry with all known peers from DHT again
+        findPeersViaDHT(infoHashBuffer, (err, dhtPeers) => {
+          if (err || dhtPeers.length === 0) {
+            return reject(new Error('DHT found no peers on retry'));
+          }
+          console.log(`👥 Round ${round}: got ${dhtPeers.length} DHT peers (retry)`);
+          proceedWithPeers(dhtPeers);
+        });
+      }
+    }
+
+    // Kick off the first round
     findPeersViaTrackers(infoHashBuffer, allTrackers, (trackerPeers) => {
       if (trackerPeers.length > 0) {
         console.log(`👥 Found ${trackerPeers.length} peers via tracker`);
         proceedWithPeers(trackerPeers);
       } else {
         console.log('⚠️ No tracker peers found, falling back to DHT...');
+        triedDHT = true;
         findPeersViaDHT(infoHashBuffer, (err, dhtPeers) => {
           if (err || dhtPeers.length === 0) {
             return reject(new Error('Could not find any peers via trackers or DHT'));
@@ -64,11 +112,14 @@ function magnetToTorrent(magnetUri) {
     });
 
     function proceedWithPeers(peers) {
+      // Track which peers we've already tried
+      peers.forEach(p => usedPeers.add(`${p.host}:${p.port}`));
 
       // 3. Fetch metadata from peers
       fetchMetadataFromPeers(peers, infoHashBuffer, (err, metadata) => {
         if (err || !metadata) {
-          return reject(new Error('Could not fetch torrent metadata from peers'));
+          console.warn(`⚠️ All peers in this batch failed — scheduling retry...`);
+          return nextRound();
         }
 
         console.log(`✅ Metadata fetched successfully`);
