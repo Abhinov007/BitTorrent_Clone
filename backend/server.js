@@ -132,9 +132,15 @@ socket.on('data', data => {
 
 // server.js — wrap the bottom block in a function and export it
 
-function startDownload(torrentPath) {
-  const torrent = parseTorrent(torrentPath);
+function startDownload(torrentPathOrObject) {
+  // Accept either a file path (string) or an already-parsed torrent object
+  const torrent = typeof torrentPathOrObject === 'string'
+    ? parseTorrent(torrentPathOrObject)
+    : torrentPathOrObject;
+
   const pieceManager = new PieceManager(torrent);
+
+  console.log(`🚀 Starting download: ${torrent.name} (${torrent.totalPieces || '?'} pieces)`);
 
   for (let i = 0; i < MAX_CONNECTIONS; i++) {
     tryNextPeer();

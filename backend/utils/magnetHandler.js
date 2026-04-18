@@ -112,7 +112,7 @@ function findPeersViaTrackers(infoHashBuffer, trackerUrls, callback) {
   trackerUrls.forEach(trackerUrl => {
     try {
       const url = new URL(trackerUrl);
-      const query = `info_hash=${percentEncode(infoHashBuffer)}&peer_id=${percentEncode(peerId)}&port=6881&uploaded=0&downloaded=0&left=1&compact=1&numwant=20`;
+      const query = `info_hash=${percentEncode(infoHashBuffer)}&peer_id=${percentEncode(peerId)}&port=6881&uploaded=0&downloaded=0&left=1&compact=1&numwant=50`;
       const fullUrl = `${url.origin}${url.pathname}?${query}`;
       const protocol = fullUrl.startsWith('https') ? https : http;
 
@@ -283,12 +283,10 @@ function fetchMetadataFromPeer(peer, infoHashBuffer, callback) {
 
       if (msg.length === 0) continue;
       const msgId = msg.readUInt8(0);
-      console.log(`  📨 Message from ${peer.host}: id=${msgId} len=${msgLen}`);
 
       // Extension message (id = 20)
       if (msgId === 20) {
         const extMsgId = msg.readUInt8(1);
-        console.log(`  🔧 Extension message: sub-id=${extMsgId}`);
         let payload;
         try {
           payload = bencode.decode(msg.slice(2));
@@ -303,13 +301,10 @@ function fetchMetadataFromPeer(peer, infoHashBuffer, callback) {
             extensionId = payload.m.ut_metadata; // peer's ID — used when WE request
             metadataSize = payload.metadata_size;
 
-            console.log(`  📋 Peer ut_metadata ID: ${extensionId}, metadata size: ${metadataSize} bytes`);
-
             if (!metadataSize) return finish(new Error('Peer did not send metadata_size'));
 
-            // Request all metadata pieces using the peer's extension ID
             const numPieces = Math.ceil(metadataSize / METADATA_BLOCK_SIZE);
-            console.log(`  📦 Requesting ${numPieces} metadata pieces...`);
+            console.log(`  📦 Requesting ${numPieces} metadata pieces from ${peer.host}...`);
             for (let i = 0; i < numPieces; i++) {
               socket.write(buildMetadataRequest(extensionId, i));
             }
@@ -321,7 +316,6 @@ function fetchMetadataFromPeer(peer, infoHashBuffer, callback) {
           const dictEnd = findBencodeEnd(rawPayload);
           const piece = bencode.decode(rawPayload.slice(0, dictEnd));
           const pieceData = rawPayload.slice(dictEnd);
-          console.log(`  📥 Metadata piece ${piece.piece}, data=${pieceData.length} bytes`);
 
           if (piece.msg_type === 1 && piece.piece !== undefined) {
             metadataPieces[piece.piece] = pieceData;
