@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "WebFetch(domain:localhost)"
+      "WebFetch(domain:localhost)",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\91974\\\\Desktop\\\\bittorrent\\\\frontend\\\\src\" -Recurse | Where-Object { -not $_.PSIsContainer } | Select-Object FullName)",
+      "mcp__Claude_Preview__preview_start"
     ]
   }
 }

@@ -4,8 +4,7 @@ const parseTorrent = require('./utils/torrentParser');
 const getPeers = require('./utils/tracker');
 const path = require('path');
 const fs = require('fs');
-const pieceManager = require('./utils/pieceSelector');
-const { startDownload } = require('./server');
+const { startDownload, getStats } = require('./server');
 const { magnetToTorrent } = require('./utils/magnetHandler');
 const crypto = require('crypto');
 const { PORT, UPLOAD_PATH, DOWNLOAD_PATH, PROWLARR_URL, PROWLARR_API_KEY, SEARCH_LIMIT } = require('./config');
@@ -25,8 +24,7 @@ if (!fs.existsSync(uploadPath)) {
 }
 
 app.get('/api/status', (req, res) => {
-  const stats = pieceManager.getDownloadedStats();
-  res.json(stats);
+  res.json(getStats());
 });
 
 app.get('/api/peers', (req, res) => {
@@ -179,6 +177,25 @@ app.post('/api/download/url', async (req, res) => {
       return res.status(504).json({ error: 'Request timed out — indexer is too slow, try another result' });
     }
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/download/magnet', async (req, res) => {
+  const { magnetLink } = req.body;
+
+  if (!magnetLink || !magnetLink.startsWith('magnet:')) {
+    return res.status(400).json({ error: 'Valid magnetLink is required' });
+  }
+
+  console.log(`🧲 Starting magnet download...`);
+
+  try {
+    res.json({ message: 'Fetching metadata via DHT...', magnetLink });
+    const torrent = await magnetToTorrent(magnetLink);
+    startDownload(torrent);
+    console.log(`✅ Magnet download started: ${torrent.name}`);
+  } catch (err) {
+    console.error('Magnet download error:', err.message);
   }
 });
 

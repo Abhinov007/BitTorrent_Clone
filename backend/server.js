@@ -132,13 +132,16 @@ socket.on('data', data => {
 
 // server.js — wrap the bottom block in a function and export it
 
+// Module-level reference so getStats() can always reach the active manager
+let activePieceManager = null;
+
 function startDownload(torrentPathOrObject) {
   // Accept either a file path (string) or an already-parsed torrent object
   const torrent = typeof torrentPathOrObject === 'string'
     ? parseTorrent(torrentPathOrObject)
     : torrentPathOrObject;
 
-  const pieceManager = new PieceManager(torrent);
+  activePieceManager = new PieceManager(torrent);
 
   console.log(`🚀 Starting download: ${torrent.name} (${torrent.totalPieces || '?'} pieces)`);
 
@@ -147,4 +150,15 @@ function startDownload(torrentPathOrObject) {
   }
 }
 
-module.exports = { startDownload };
+/**
+ * Returns download stats for the currently active torrent.
+ * Safe to call at any time — returns zeros if no download is active.
+ */
+function getStats() {
+  if (!activePieceManager) {
+    return { downloaded: 0, total: 0, percent: '0.00' };
+  }
+  return activePieceManager.getDownloadedStats();
+}
+
+module.exports = { startDownload, getStats };
