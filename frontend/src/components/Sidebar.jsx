@@ -1,49 +1,108 @@
-const NAV_ITEMS = [
-  { id: 'search',      label: 'Search',      icon: SearchIcon },
-  { id: 'downloading', label: 'Downloading',  icon: DownloadIcon },
-  { id: 'completed',   label: 'Completed',    icon: CheckIcon },
-  { id: 'active',      label: 'Active',       icon: BoltIcon },
-  { id: 'inactive',    label: 'Inactive',     icon: PauseIcon },
+const NAV = [
+  { id: 'search',      label: 'Search',      icon: '🔍' },
+  { id: 'downloading', label: 'Downloading',  icon: '⬇️' },
+  { id: 'completed',   label: 'Completed',    icon: '✓' },
+  { id: 'active',      label: 'Active',       icon: '⚡' },
+  { id: 'inactive',    label: 'Inactive',     icon: '⏸' },
 ];
 
-function SearchIcon()   { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg> }
-function DownloadIcon() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> }
-function CheckIcon()    { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4"><polyline points="20 6 9 17 4 12"/></svg> }
-function BoltIcon()     { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> }
-function PauseIcon()    { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> }
+const DETAILS = [
+  { id: 'general',  label: 'General',  icon: '◻' },
+  { id: 'trackers', label: 'Trackers', icon: '↻' },
+  { id: 'files',    label: 'Files',    icon: '📁' },
+  { id: 'peers',    label: 'Peers',    icon: '👥' },
+  { id: 'speed',    label: 'Speed',    icon: '📶' },
+];
+
+function NavItem({ item, active, onClick }) {
+  return (
+    <button
+      onClick={() => onClick(item.id)}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        width: '100%',
+        padding: '8px 12px',
+        borderRadius: 8,
+        border: 'none',
+        cursor: 'pointer',
+        fontSize: 13,
+        fontWeight: active ? 600 : 400,
+        textAlign: 'left',
+        transition: 'all 0.15s',
+        background: active ? '#6d28d9' : 'transparent',
+        color: active ? '#ffffff' : '#6b7280',
+      }}
+      onMouseEnter={e => { if (!active) e.currentTarget.style.background = '#ede9fe'; }}
+      onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent'; }}
+    >
+      <span style={{ width: 16, textAlign: 'center', fontSize: 12 }}>{item.icon}</span>
+      {item.label}
+    </button>
+  );
+}
 
 export default function Sidebar({ activeNav, onNav }) {
   return (
-    <aside className="w-44 bg-[#161720] border-r border-white/5 flex flex-col shrink-0">
+    <aside style={{
+      width: 200,
+      minWidth: 200,
+      background: '#f5f3ff',
+      display: 'flex',
+      flexDirection: 'column',
+      borderRight: '1px solid #ede9fe',
+    }}>
+
       {/* Logo */}
-      <div className="px-5 py-5 flex items-center gap-2.5">
-        <div className="w-7 h-7 rounded-lg bg-violet-600 flex items-center justify-center shrink-0">
-          <svg viewBox="0 0 24 24" fill="white" className="w-4 h-4">
-            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-          </svg>
+      <div style={{ padding: '20px 20px 16px', borderBottom: '1px solid #ede9fe' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{
+            width: 32, height: 32, borderRadius: 8,
+            background: 'linear-gradient(135deg, #7c3aed, #4f46e5)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 16, color: 'white',
+          }}>
+            🧲
+          </div>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 13, color: '#1f2937' }}>BitClient</div>
+            <div style={{ fontSize: 10, color: '#9ca3af' }}>v1.0.0</div>
+          </div>
         </div>
-        <span className="font-bold text-sm text-white tracking-wide">BitClient</span>
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 px-2 py-2 space-y-0.5">
-        {NAV_ITEMS.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            onClick={() => onNav(id)}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all
-              ${activeNav === id
-                ? 'bg-violet-600/20 text-violet-300'
-                : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'
-              }`}
-          >
-            <Icon />
-            {label}
-          </button>
+      {/* Torrents section */}
+      <div style={{ padding: '16px 12px 8px' }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: '#a78bfa', letterSpacing: '0.08em', padding: '0 8px 8px', textTransform: 'uppercase' }}>
+          Torrents
+        </div>
+        {NAV.map(item => (
+          <NavItem key={item.id} item={item} active={activeNav === item.id} onClick={onNav} />
         ))}
-      </nav>
+      </div>
 
-      <div className="px-5 py-4 text-xs text-gray-700">v1.0.0</div>
+      {/* Details section */}
+      <div style={{ padding: '8px 12px', borderTop: '1px solid #ede9fe', marginTop: 8 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: '#a78bfa', letterSpacing: '0.08em', padding: '8px 8px 8px', textTransform: 'uppercase' }}>
+          Details
+        </div>
+        {DETAILS.map(item => (
+          <NavItem key={item.id} item={item} active={false} onClick={() => {}} />
+        ))}
+      </div>
+
+      {/* Bandwidth footer */}
+      <div style={{ marginTop: 'auto', padding: '12px 20px', borderTop: '1px solid #ede9fe', background: '#f5f3ff' }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: '#a78bfa', letterSpacing: '0.08em', marginBottom: 8, textTransform: 'uppercase' }}>
+          Bandwidth
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#6b7280' }}>
+          <span>⬇ 0 KB/s</span>
+          <span>⬆ 0 KB/s</span>
+        </div>
+      </div>
+
     </aside>
   );
 }

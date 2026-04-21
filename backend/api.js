@@ -150,32 +150,34 @@ app.post('/api/download/url', async (req, res) => {
     res.json({ message: 'Download started', name: parsed.name });
 
   } catch (err) {
-    console.error('Download error:', err.message);
-
-        // Prowlarr redirected to a magnet: URI — axios can't follow it, extract from error
-        if (err.message && err.message.includes('magnet:')) {
-          const magnetMatch = err.message.match(/(magnet:[^\s"]+)/);
-          if (magnetMatch) {
-            console.log('🔁 Caught magnet redirect, switching to magnet handler...');
-            try {
-              const torrent = await magnetToTorrent(magnetMatch[1]);
-              startDownload(torrent);
-              return res.json({ message: 'Download started via magnet', name: torrent.name });
-            } catch (magnetErr) {
-              return res.status(500).json({ error: 'Magnet fallback failed: ' + magnetErr.message });
-            }
-          }
+    // Prowlarr redirected to a magnet: URI — axios can't follow it, extract from error
+    if (err.message && err.message.includes('magnet:')) {
+      const magnetMatch = err.message.match(/(magnet:[^\s"]+)/);
+      if (magnetMatch) {
+        console.log('🔁 Caught magnet redirect, switching to magnet handler...');
+        try {
+          const torrent = await magnetToTorrent(magnetMatch[1]);
+          startDownload(torrent);
+          return res.json({ message: 'Download started via magnet', name: torrent.name });
+        } catch (magnetErr) {
+          return res.status(500).json({ error: 'Magnet fallback failed: ' + magnetErr.message });
         }
-        
+      }
+    }
+
     if (err.response) {
-      // Server responded with error status
-      return res.status(502).json({
-        error: `Indexer returned ${err.response.status} — try a different result`,
-      });
+      const status = err.response.status;
+      if (status === 429) {
+        console.warn(`⚠️ Indexer rate-limited (429) — client will retry via magnet/hash`);
+        return res.status(429).json({ error: 'Indexer rate limit hit — try again in a moment' });
+      }
+      console.warn(`⚠️ Indexer returned ${status} — client will retry via fallback`);
+      return res.status(502).json({ error: `Indexer returned ${status} — try a different result` });
     }
     if (err.code === 'ECONNABORTED') {
-      return res.status(504).json({ error: 'Request timed out — indexer is too slow, try another result' });
+      return res.status(504).json({ error: 'Request timed out — indexer is too slow' });
     }
+    console.error('Download error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -206,14 +208,14 @@ app.post('/api/download/hash', async (req, res) => {
     return res.status(400).json({ error: 'infoHash is required' });
   }
 
-  // Build a magnet link from the info hash + known public trackers
+  // Build a magnet link — use archive.org + port-80 trackers first (rarely blocked by Pi-hole)
   const trackers = [
+    'http://bt1.archive.org:6969/announce',
+    'http://bt2.archive.org:6969/announce',
+    'http://tracker.openbittorrent.com:80/announce',
+    'https://opentracker.i2p.rocks:443/announce',
     'http://tracker.opentrackr.org:1337/announce',
     'http://open.tracker.cl:1337/announce',
-    'http://tracker.openbittorrent.com:80/announce',
-    'http://tracker.internetwarriors.net:1337/announce',
-    'udp://tracker.opentrackr.org:1337/announce',
-    'udp://open.stealth.si:80/announce',
   ].map(t => `&tr=${encodeURIComponent(t)}`).join('');
 
   const dn = title ? `&dn=${encodeURIComponent(title)}` : '';

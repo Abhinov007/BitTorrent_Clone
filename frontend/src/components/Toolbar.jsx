@@ -9,42 +9,83 @@ export default function Toolbar({ onSearch, searching }) {
   }
 
   return (
-    <header className="h-14 bg-[#161720] border-b border-white/5 flex items-center px-5 gap-4 shrink-0">
+    <header style={{
+      height: 56,
+      background: '#ffffff',
+      borderBottom: '1px solid #f3f4f6',
+      display: 'flex',
+      alignItems: 'center',
+      padding: '0 20px',
+      gap: 12,
+    }}>
+
+      {/* macOS-style traffic lights */}
+      <div style={{ display: 'flex', gap: 6, marginRight: 8 }}>
+        {['#ff5f57', '#ffbd2e', '#28c840'].map(c => (
+          <div key={c} style={{ width: 12, height: 12, borderRadius: '50%', background: c }} />
+        ))}
+      </div>
+
+      {/* Toolbar action buttons */}
+      <button style={btnStyle} title="Resume">▶</button>
+      <button style={btnStyle} title="Pause">⏹</button>
+      <button style={btnStyle} title="Delete">🗑</button>
+
+      <div style={{ flex: 1 }} />
+
       {/* Search */}
-      <form onSubmit={handleSubmit} className="flex items-center gap-2 flex-1 max-w-lg">
-        <div className="relative flex-1">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-            className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-600 pointer-events-none">
-            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
-          </svg>
+      <form onSubmit={handleSubmit} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div style={{ position: 'relative' }}>
+          <span style={{
+            position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)',
+            color: '#9ca3af', fontSize: 13, pointerEvents: 'none'
+          }}>🔍</span>
           <input
             type="text"
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder="Search torrents..."
-            className="w-full pl-9 pr-4 py-2 rounded-lg bg-[#0d0e18] border border-white/8
-                       text-sm text-gray-200 placeholder-gray-600
-                       focus:outline-none focus:border-violet-500/60 transition-colors"
+            placeholder="Search torrents…"
+            style={{
+              paddingLeft: 32, paddingRight: 12, paddingTop: 7, paddingBottom: 7,
+              borderRadius: 8, border: '1.5px solid #e5e7eb',
+              fontSize: 13, color: '#1f2937', outline: 'none',
+              background: '#fafafa', width: 220,
+              transition: 'border-color 0.15s',
+            }}
+            onFocus={e => e.target.style.borderColor = '#7c3aed'}
+            onBlur={e => e.target.style.borderColor = '#e5e7eb'}
           />
         </div>
         <button
           type="submit"
           disabled={searching || query.trim().length < 2}
-          className="px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-500
-                     text-white text-sm font-medium
-                     disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          style={{
+            padding: '7px 18px',
+            borderRadius: 8,
+            border: 'none',
+            background: searching || query.trim().length < 2 ? '#ddd6fe' : '#6d28d9',
+            color: searching || query.trim().length < 2 ? '#7c3aed' : '#ffffff',
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: searching || query.trim().length < 2 ? 'not-allowed' : 'pointer',
+            transition: 'all 0.15s',
+          }}
         >
-          {searching
-            ? <span className="flex items-center gap-2">
-                <svg className="animate-spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                  <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83"/>
-                </svg>
-                Searching
-              </span>
-            : 'Search'
-          }
+          {searching ? '…' : 'Search'}
         </button>
       </form>
     </header>
   );
 }
+
+const btnStyle = {
+  width: 30, height: 30,
+  borderRadius: 6,
+  border: '1px solid #e5e7eb',
+  background: '#fafafa',
+  cursor: 'pointer',
+  fontSize: 12,
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+  color: '#6b7280',
+  transition: 'all 0.15s',
+};

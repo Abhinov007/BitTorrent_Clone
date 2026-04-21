@@ -11,11 +11,19 @@ const MAX_PEERS_TO_TRY = 15;      // try more peers in case most are slow/unresp
 const DHT_LOOKUP_TIMEOUT = 60000;
 const METADATA_TIMEOUT = 30000;   // increase to 30s — some peers are slow
 
-// Public HTTP trackers — more reliable than UDP through firewalls
+// Public HTTP trackers — ordered by likelihood of working through firewalls/DNS blockers.
+// archive.org (port 6969) and port-80 trackers are rarely blocked by Pi-hole/AdGuard.
 const FALLBACK_HTTP_TRACKERS = [
+  // Internet Archive — almost never DNS-blocked, port 6969
+  'http://bt1.archive.org:6969/announce',
+  'http://bt2.archive.org:6969/announce',
+  // Port 80 — passes through most firewalls
+  'http://tracker.openbittorrent.com:80/announce',
+  // HTTPS — port 443, very rarely blocked
+  'https://opentracker.i2p.rocks:443/announce',
+  // Port 1337 — may be blocked on some networks, but worth trying
   'http://tracker.opentrackr.org:1337/announce',
   'http://open.tracker.cl:1337/announce',
-  'http://tracker.openbittorrent.com:80/announce',
 ];
 
 /**
@@ -112,6 +120,17 @@ function magnetToTorrent(magnetUri) {
     });
 
     function proceedWithPeers(peers) {
+      // Filter out loopback/bogon peers — caused by DNS blockers redirecting tracker domains
+      peers = peers.filter(p => {
+        const h = p.host;
+        return h !== '127.0.0.1' && h !== '0.0.0.0' && !h.startsWith('127.') && h !== '::1';
+      });
+
+      if (peers.length === 0) {
+        console.warn('⚠️ All peers filtered out (DNS blocker redirecting trackers to localhost)');
+        return nextRound();
+      }
+
       // Track which peers we've already tried
       peers.forEach(p => usedPeers.add(`${p.host}:${p.port}`));
 

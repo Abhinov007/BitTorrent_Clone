@@ -1,14 +1,16 @@
 import { useState } from 'react';
-import SearchBar from './components/SearchBar';
-import SearchResults from './components/SearchResults';
-import DownloadManager from './components/DownloadManager';
+import Sidebar from './components/Sidebar';
+import Toolbar from './components/Toolbar';
+import TorrentTable from './components/TorrentTable';
+import StatsPanel from './components/StatsPanel';
 import { searchTorrents } from './api';
 
 export default function App() {
-  const [results, setResults]         = useState(null);   // null = never searched
+  const [results, setResults]         = useState(null);
   const [searchError, setSearchError] = useState(null);
   const [searching, setSearching]     = useState(false);
-  const [activeName, setActiveName]   = useState(null);   // last started torrent name
+  const [activeNav, setActiveNav]     = useState('search');
+  const [activeName, setActiveName]   = useState(null);
 
   async function handleSearch(query) {
     setSearching(true);
@@ -25,38 +27,46 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white">
-      {/* Header */}
-      <header className="border-b border-gray-800 px-6 py-4 flex items-center gap-3">
-        <span className="text-2xl">🧲</span>
-        <h1 className="text-xl font-bold tracking-tight">BitTorrent Client</h1>
-        <span className="ml-auto text-xs text-gray-500">Node.js + React</span>
-      </header>
+    /* outer purple shell */
+    <div style={{ minHeight: '100vh', background: '#1e1147', padding: '32px', display: 'flex', alignItems: 'flex-start', justifyContent: 'center' }}>
 
-      <main className="max-w-6xl mx-auto px-4 py-8 flex flex-col gap-8">
-        {/* Search */}
-        <section className="flex flex-col items-center gap-4">
-          <h2 className="text-2xl font-semibold text-gray-100">Search Torrents</h2>
-          <SearchBar onSearch={handleSearch} loading={searching} />
-        </section>
+      {/* floating app card */}
+      <div style={{
+        display: 'flex',
+        width: '100%',
+        maxWidth: '1200px',
+        height: 'calc(100vh - 64px)',
+        borderRadius: '16px',
+        overflow: 'hidden',
+        boxShadow: '0 32px 80px rgba(0,0,0,0.5)',
+      }}>
 
-        {/* Two-column layout: results | download manager */}
-        <div className="flex flex-col lg:flex-row gap-6">
-          {/* Results */}
-          <div className="flex-1 min-w-0">
-            <SearchResults
-              results={results}
-              error={searchError}
-              onDownloadStart={name => setActiveName(name)}
-            />
-          </div>
+        <Sidebar activeNav={activeNav} onNav={setActiveNav} />
 
-          {/* Download Manager sidebar */}
-          <div className="w-full lg:w-80 shrink-0">
-            <DownloadManager activeName={activeName} />
-          </div>
+        {/* right panel — white */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: '#ffffff' }}>
+          <Toolbar onSearch={handleSearch} searching={searching} />
+
+          <main style={{ flex: 1, overflow: 'auto', background: '#ffffff' }}>
+            {activeNav === 'search' ? (
+              <TorrentTable
+                results={results}
+                error={searchError}
+                searching={searching}
+                onDownloadStart={name => { setActiveName(name); setActiveNav('downloading'); }}
+              />
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 12, color: '#c4b5fd' }}>
+                <div style={{ fontSize: 48, opacity: 0.3 }}>🚧</div>
+                <p style={{ margin: 0, fontSize: 14, color: '#9ca3af' }}>Coming soon</p>
+              </div>
+            )}
+          </main>
+
+          <StatsPanel activeName={activeName} />
         </div>
-      </main>
+
+      </div>
     </div>
   );
 }
