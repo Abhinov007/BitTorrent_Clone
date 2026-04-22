@@ -3,7 +3,12 @@
     "allow": [
       "WebFetch(domain:localhost)",
       "PowerShell(Get-ChildItem \"C:\\\\Users\\\\91974\\\\Desktop\\\\bittorrent\\\\frontend\\\\src\" -Recurse | Where-Object { -not $_.PSIsContainer } | Select-Object FullName)",
-      "mcp__Claude_Preview__preview_start"
+      "mcp__Claude_Preview__preview_start",
+      "Bash(node -e ' *)",
+      "Bash(npm install *)",
+      "Bash(node generate_pdf.js)",
+      "Bash(del generate_pdf.js)",
+      "Bash(npm uninstall *)"
     ]
   }
 }

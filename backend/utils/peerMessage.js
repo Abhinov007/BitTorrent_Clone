@@ -1,33 +1,33 @@
-function createMessage(messageId){
-    const length=  Buffer.alloc(5);
-    length.writeUInt32BE(1,0);
-    length.writeUInt8(messageId,4);
-    return length;
+function createMessage(messageId) {
+  const buf = Buffer.alloc(5);
+  buf.writeUInt32BE(1, 0);
+  buf.writeUInt8(messageId, 4);
+  return buf;
 }
 
-function sendChoke(socket){
-    socket.write(createMessage(0));
-    console.log("Sent:Choke");
+function sendChoke(socket)         { socket.write(createMessage(0)); }
+function sendUnchoke(socket)       { socket.write(createMessage(1)); }
+function sendInterested(socket)    { socket.write(createMessage(2)); }
+function sendNotInterested(socket) { socket.write(createMessage(3)); }
+
+/**
+ * Sends a PIECE message (id=7) — used when uploading a block to a peer.
+ */
+function sendPiece(socket, index, begin, data) {
+  const msg = Buffer.alloc(13 + data.length);
+  msg.writeUInt32BE(9 + data.length, 0); // length prefix
+  msg.writeUInt8(7, 4);                   // message id = 7
+  msg.writeUInt32BE(index, 5);
+  msg.writeUInt32BE(begin, 9);
+  data.copy(msg, 13);
+  socket.write(msg);
 }
 
-function sendUnchoke(socket){
-    socket.write(createMessage(1));
-    console.log("Sent:Unchoke");
-}
-
-function sendInterested(socket){
-    socket.write(createMessage(2));
-    console.log("Sent:Interested");
-}
-
-function sendUninterested(socket){
-    socket.write(createMessage(3));
-    console.log("Sent:Uninterested");
-}
-
-module.exports={
-    sendChoke,
-    sendUnchoke,
-    sendInterested,
-    sendUninterested
+module.exports = {
+  sendChoke,
+  sendUnchoke,
+  sendInterested,
+  sendNotInterested,
+  sendUninterested: sendNotInterested, // alias for backwards compat
+  sendPiece,
 };

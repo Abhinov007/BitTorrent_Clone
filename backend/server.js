@@ -1,91 +1,103 @@
 const net = require('net');
-const fs = require('fs');
-const parseTorrent = require('./utils/torrentParser');
-const PieceManager = require('./utils/pieceSelector');
-const handlePeerWire = require('./peers/peerWire');
+const fs  = require('fs');
 const path = require('path');
+
+const parseTorrent  = require('./utils/torrentParser');
+const PieceManager  = require('./utils/pieceSelector');
+const handlePeerWire = require('./peers/peerWire');
 const { buildHandshake } = require('./utils/handshake');
 const { MAX_CONNECTIONS, MAX_RETRIES } = require('./config');
-
-
 const {
   sendChoke,
   sendUnchoke,
   sendInterested,
-  sendNotInterested
+  sendNotInterested,
 } = require('./utils/peerMessage');
 
-
+// ─── Logging ──────────────────────────────────────────────────────────────────
 const logPath = path.join(__dirname, 'logs/connections.log');
 fs.mkdirSync(path.dirname(logPath), { recursive: true });
-fs.writeFileSync(logPath, ''); // Clear previous logs
+fs.writeFileSync(logPath, '');
 
-const torrent = parseTorrent("ubuntu.torrent");
-const pieceManager = new PieceManager(torrent);
-
-
-const infoHash = '611f70899d4e1d6a9c39cfc925f103dfef630328'; // Ubuntu ISO test torrent
-const peerId = '-UT0001-' + Math.random().toString(36).substring(2, 14).padEnd(12, '0')
-
-const peerList = [
-  { ip: '2600:1702:4fb0:acdf:dacb:8aff:fe72:fac0', port: 42070 },
-  { ip: '2a00:23c7:acea:a801:c635:4a3a:11aa:e14c', port: 49100 },
-  { ip: 'facepalm.jpe.gs', port: 57070 },
-  { ip: 'distro-seeder-vm.vmbr1.hel1.moderateinfra.net', port: 42787 },
-  { ip: '2408:8276:3219:ff71::e2e', port: 63219 },
-  { ip: '2a00:1370:819a:5125:93f8:49b2:c0cb:c863', port: 51413 },
-  { ip: '2001:bc8:1203:2b9::10', port: 51413 },
-  { ip: '2a01:e0a:d5b:2100::1', port: 13249 },
-  { ip: '2a00:6020:504e:9400:211:32ff:feb7:b351', port: 51413 },
-  { ip: '2a01:e0a:204:18e0:55d2:6bc9:1efe:7099', port: 14934 },
-  { ip: '2607:fea8:fdf0:825b:5ba3:d3d7:a975:379', port: 51413 },
-  { ip: '2602:feb4:7c:cc00:f0db:20fe:3dcd:526c', port: 19481 },
-  { ip: '2a01:e0a:352:2450:211:32ff:fed8:cacb', port: 63810 },
-  { ip: '2606:83c0:b801:c600:a4ab:d92e:a931:831f', port: 57350 },
-  { ip: '2a01:e0a:54d:4110:4c47:70fa:ac0c:aa3b', port: 51413 },
-  { ip: '2a06.4004.c200.0000.0000.0000.0000.0015.static6.kviknet.net', port: 51413 },
-  { ip: '2a02:247a:210:a800::1', port: 6962 },
-  { ip: '2a00:6800:3:f49::100', port: 51413 },
-  { ip: '2001:470:7a83:6f74:0:7069:7261:7465', port: 6979 },
-  { ip: '2804:7f0:d889:13f:7c55:e366:a7e:dd2', port: 51413 },
-  { ip: '2408:8207:2563:4730::683', port: 49528 },
-  { ip: '2c0f:eb58:651:fb00:a197:9321:ebcd:68e8', port: 19749 },
-  { ip: '2001:da8:208:181:40f2:c346:b274:73da', port: 40433 },
-  { ip: '2001:41d0:a:6785::1', port: 6939 },
-  { ip: '2001:41d0:a:6785::1', port: 6939 },
-  { ip: '2a0d:c580:1:3:89::1', port: 29855 },
-  { ip: '2a0d:c580:1:3:89::1', port: 29855 },
-  { ip: '2a01:e0a:204:18e0:e5bd:28bb:671e:218', port: 14934 },
-  { ip: '2a02:8071:5151:700:f491:de5c:ff4e:4ba7', port: 56789 },
-  { ip: '240e:390:5248:5e20:d200:6ff:fe12:a32', port: 63219 },
-  { ip: '240e:390:5248:5e20:d200:6ff:fe12:a32', port: 63219 },
-  { ip: '2a0c:5a82:180b:e00:8b32:8708:56b6:e963', port: 45201 },
-  { ip: '2a0c:5a82:180b:e00:8b32:8708:56b6:e963', port: 45201 },
-  { ip: '2a01:e0a:4a2:f6b0::1', port: 47974 },
-  { ip: '2a01:e0a:4a2:f6b0::1', port: 47974 },
-  { ip: '2600:1700:7781:32d0:b204:7c3:77de:a559', port: 15837 },
-  { ip: '2600:1700:7781:32d0:b204:7c3:77de:a559', port: 15837 },
-  { ip: '2a02:8071:5151:700:f491:de5c:ff4e:4ba7', port: 56789 }
-];
-
-
-let activeConnections = 0;
-
-const peerStatus = peerList.map(p => ({
-  ...p,
-  attempts: 0,
-  connected: false,
-  failed: false,
-}));
-
-function logConnection(message) {
-  fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${message}\n`);
+function logConnection(msg) {
+  fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${msg}\n`);
 }
 
+// ─── Module-level download state ──────────────────────────────────────────────
+let activePieceManager = null;   // current torrent's piece manager
+let activePeerStatus   = [];     // [{ ip, port, attempts, connected, failed }]
+let activeConnections  = 0;
+
+// Map of socket → peerState — used by the unchoke timer
+const activePeers = new Map();
+
+// Stable peer ID for this process lifetime
+const peerId = '-BT0001-' + Math.random().toString(36).substring(2, 14).padEnd(12, '0');
+
+// ─── Tit-for-tat unchoke timer ────────────────────────────────────────────────
+const MAX_UNCHOKED   = 3;   // max peers we upload to at once
+const UNCHOKE_INTERVAL = 10000; // 10 seconds
+let unchokeRound = 0;
+let unchokeTimer = null;
+
+function startUnchokeTimer() {
+  if (unchokeTimer) return; // only one timer per process
+
+  unchokeTimer = setInterval(() => {
+    unchokeRound++;
+
+    const peers = [...activePeers.entries()]; // [socket, peerState]
+
+    // Only consider peers who told us they're interested in downloading from us
+    const interested = peers.filter(([, ps]) => ps.peerInterested);
+
+    // Sort by bytes we downloaded from them in the last interval (tit-for-tat)
+    interested.sort((a, b) => b[1].downloadedFromPeer - a[1].downloadedFromPeer);
+
+    // Top MAX_UNCHOKED peers get unchoked
+    const toUnchoke = new Set(interested.slice(0, MAX_UNCHOKED).map(([s]) => s));
+
+    // Optimistic unchoke: every 3rd round (every 30s), randomly unchoke one
+    // additional choked peer so new peers get a chance to prove themselves
+    if (unchokeRound % 3 === 0) {
+      const stillChoked = interested.slice(MAX_UNCHOKED);
+      if (stillChoked.length > 0) {
+        const pick = stillChoked[Math.floor(Math.random() * stillChoked.length)];
+        toUnchoke.add(pick[0]);
+        console.log(`🎲 Optimistic unchoke: giving a slot to a new peer`);
+      }
+    }
+
+    // Apply decisions
+    for (const [socket, ps] of peers) {
+      if (toUnchoke.has(socket)) {
+        if (ps.amChoking) {
+          ps.amChoking = false;
+          sendUnchoke(socket);
+          console.log(`🔓 Unchoked peer (uploaded ${ps.downloadedFromPeer}B to us this round)`);
+        }
+      } else {
+        if (!ps.amChoking) {
+          ps.amChoking = true;
+          sendChoke(socket);
+          console.log(`⛔ Choked slow/uninterested peer`);
+        }
+      }
+
+      // Reset rate counter for next interval
+      ps.downloadedFromPeer = 0;
+    }
+  }, UNCHOKE_INTERVAL);
+}
+
+// ─── Peer connection ──────────────────────────────────────────────────────────
 function tryNextPeer() {
   if (activeConnections >= MAX_CONNECTIONS) return;
+  if (!activePieceManager) return;
 
-  const peer = peerStatus.find(p => !p.connected && !p.failed && p.attempts < MAX_RETRIES);
+  const peer = activePeerStatus.find(
+    p => !p.connected && !p.failed && p.attempts < MAX_RETRIES
+  );
   if (!peer) return;
 
   peer.attempts++;
@@ -93,57 +105,79 @@ function tryNextPeer() {
 
   const socket = net.connect(peer.port, peer.ip, () => {
     logConnection(`✅ Connected to ${peer.ip}:${peer.port}`);
-    const handshake = buildHandshake(infoHash, peerId);
+    const handshake = buildHandshake(activePieceManager.torrent.infoHash, peerId);
     socket.write(handshake);
   });
 
+  // Full peerState — choked/unchoked from both sides + rate tracking
+  const peerState = {
+    bitfield:            [],
+    choked:              true,   // are THEY choking US  (blocks our downloads)
+    amChoking:           true,   // are WE choking THEM  (blocks their uploads from us)
+    peerInterested:      false,  // has the peer sent INTERESTED to us
+    inFlight:            new Set(),
+    downloadedFromPeer:  0,      // bytes received from this peer since last unchoke tick
+  };
 
-// AFTER (one handler — correct)
-const peerState = { bitfield: [], choked: true, inFlight: new Set() };
+  // Register in the global peer map so the unchoke timer can see it
+  activePeers.set(socket, peerState);
 
-socket.on('data', data => {
-  if (!peer.connected) {
-    peer.connected = true;
-    sendInterested(socket);   // tell peer we want data
-    // DO NOT send unchoke here — wait for peer's UNCHOKE message
-  }
-
-  handlePeerWire(socket, data, pieceManager, peerState);
-});
+  socket.on('data', data => {
+    if (!peer.connected) {
+      peer.connected = true;
+      sendInterested(socket); // tell peer we want to download
+    }
+    handlePeerWire(socket, data, activePieceManager, peerState);
+  });
 
   socket.on('error', err => {
-    logConnection(`❌ Error: ${peer.ip}:${peer.port} - ${err.message}`);
+    logConnection(`❌ Error ${peer.ip}:${peer.port} — ${err.message}`);
     peer.failed = true;
     activeConnections--;
+    activePeers.delete(socket);
     tryNextPeer();
   });
 
   socket.on('close', () => {
-    logConnection(`🔌 Closed: ${peer.ip}:${peer.port}`);
+    logConnection(`🔌 Closed ${peer.ip}:${peer.port}`);
+    if (peer.connected) sendNotInterested(socket); // polite goodbye
     activeConnections--;
+    activePeers.delete(socket);
     tryNextPeer();
   });
 
   socket.setTimeout(10000, () => {
-    logConnection(`⌛Timeout: ${peer.ip}:${peer.port}`);
+    logConnection(`⌛ Timeout ${peer.ip}:${peer.port}`);
     socket.destroy();
   });
 }
 
-// server.js — wrap the bottom block in a function and export it
+// ─── Public API ───────────────────────────────────────────────────────────────
 
-// Module-level reference so getStats() can always reach the active manager
-let activePieceManager = null;
-
-function startDownload(torrentPathOrObject) {
-  // Accept either a file path (string) or an already-parsed torrent object
+/**
+ * Start downloading a torrent.
+ * Accepts either a file path string or a parsed torrent object (from magnetToTorrent).
+ * peers: optional array of { host/ip, port } to connect to immediately.
+ */
+function startDownload(torrentPathOrObject, peers = []) {
   const torrent = typeof torrentPathOrObject === 'string'
     ? parseTorrent(torrentPathOrObject)
     : torrentPathOrObject;
 
   activePieceManager = new PieceManager(torrent);
 
-  console.log(`🚀 Starting download: ${torrent.name} (${torrent.totalPieces || '?'} pieces)`);
+  // Normalise peer list — support both { host } and { ip } field names
+  activePeerStatus = peers.map(p => ({
+    ip:        p.host || p.ip,
+    port:      p.port,
+    attempts:  0,
+    connected: false,
+    failed:    false,
+  }));
+
+  console.log(`🚀 Starting download: ${torrent.name} (${activePieceManager.totalPieces} pieces, ${peers.length} peers)`);
+
+  startUnchokeTimer();
 
   for (let i = 0; i < MAX_CONNECTIONS; i++) {
     tryNextPeer();
@@ -151,14 +185,20 @@ function startDownload(torrentPathOrObject) {
 }
 
 /**
- * Returns download stats for the currently active torrent.
- * Safe to call at any time — returns zeros if no download is active.
+ * Returns live download stats. Safe to call when no download is active.
  */
 function getStats() {
-  if (!activePieceManager) {
-    return { downloaded: 0, total: 0, percent: '0.00' };
-  }
+  if (!activePieceManager) return { downloaded: 0, total: 0, percent: '0.00' };
   return activePieceManager.getDownloadedStats();
 }
 
 module.exports = { startDownload, getStats };
+
+// ─── Entry point guard ────────────────────────────────────────────────────────
+// When run directly (`node server.js` / `nodemon server.js`), boot the HTTP API.
+// When require()'d by api.js, do nothing — just export the P2P functions above.
+// This works without circular-dependency issues because module.exports is set
+// before require('./api') is called, so api.js gets the correct exports.
+if (require.main === module) {
+  require('./api');
+}

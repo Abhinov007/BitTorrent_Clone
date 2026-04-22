@@ -1,19 +1,20 @@
-const fs = require('fs');
+const fs   = require('fs');
 const path = require('path');
+const { parseMessage, MESSAGE_IDS } = require('../messagePeer');
+const { sendPiece }                  = require('../utils/peerMessage');
 
-// Constructs a request message for a block
-function sendRequest(socket, index, begin = 0, length = 16384) {
+// ─── Block request helpers ────────────────────────────────────────────────────
+
+function sendRequest(socket, index, begin, length) {
   const msg = Buffer.alloc(17);
-  msg.writeUInt32BE(13, 0); // Payload length
-  msg.writeUInt8(6, 4);     // ID = 6 (request)
+  msg.writeUInt32BE(13, 0);
+  msg.writeUInt8(6, 4);
   msg.writeUInt32BE(index, 5);
   msg.writeUInt32BE(begin, 9);
   msg.writeUInt32BE(length, 13);
   socket.write(msg);
 }
-const socketBuffers = new Map();
 
-// Deduplicates block requests — skips if already in-flight for this peer
 function requestBlock(socket, peerState, index, begin, length) {
   const key = `${index}:${begin}`;
   if (peerState.inFlight.has(key)) return;
@@ -21,142 +22,160 @@ function requestBlock(socket, peerState, index, begin, length) {
   sendRequest(socket, index, begin, length);
 }
 
-function processSingleMessage(socket, data, pieceManager, peerState) {
-  if (data.length < 5) return;
+// ─── Per-socket TCP reassembly ────────────────────────────────────────────────
 
-  const messageId = data.readUInt8(4);
+const socketBuffers = new Map();
 
-  switch (messageId) {
-    case 0: // CHOKE
-    peerState.choked = true;
-    console.log("⛔ Peer choked us.");
-    break;
+// ─── Single message handler ───────────────────────────────────────────────────
 
-  case 1: // UNCHOKE
-    peerState.choked = false;
-    console.log("🔓 Peer unchoked us.");
+function processSingleMessage(socket, rawMsg, pieceManager, peerState) {
+  const msg = parseMessage(rawMsg);
+  if (!msg || msg.id === null) return; // keep-alive or incomplete
 
-    const nextReq = pieceManager.nextBlockRequest(peerState.bitfield);
-    if (nextReq) {
-      requestBlock(socket, peerState, nextReq.index, nextReq.begin, nextReq.length);
-    }
-    break;
+  const { id, payload } = msg;
 
-  case 4: // HAVE
-    {
-      const pieceIndex = data.readUInt32BE(5);
-      peerState.bitfield[pieceIndex] = 1;
-      console.log(`📦 Peer has piece ${pieceIndex}`);
-    }
-    break;
+  switch (id) {
 
-  case 5: // BITFIELD
-    {
-      const bitfieldBuffer = data.slice(5);
-      const bitfield = [];
+    case MESSAGE_IDS.CHOKE:
+      peerState.choked = true;
+      console.log('⛔ Peer choked us');
+      break;
 
-      for (let i = 0; i < bitfieldBuffer.length * 8; i++) {
-        const byte = bitfieldBuffer[Math.floor(i / 8)];
-        const hasPiece = (byte >> (7 - i % 8)) & 1;
-        bitfield.push(hasPiece);
+    case MESSAGE_IDS.UNCHOKE:
+      peerState.choked = false;
+      console.log('🔓 Peer unchoked us — requesting next block');
+      {
+        const req = pieceManager.nextBlockRequest(peerState.bitfield);
+        if (req) requestBlock(socket, peerState, req.index, req.begin, req.length);
       }
+      break;
 
-      peerState.bitfield = bitfield;
-      console.log("🧠 Bitfield received");
+    case MESSAGE_IDS.INTERESTED:
+      peerState.peerInterested = true;
+      console.log('💬 Peer is interested in uploading from us');
+      // Unchoke timer in server.js decides whether to unchoke them
+      break;
 
-      const req = pieceManager.nextBlockRequest(bitfield);
-      if (!peerState.choked && req) {
-        requestBlock(socket, peerState, req.index, req.begin, req.length);
-      }
-    }
-    break;
+    case MESSAGE_IDS.NOT_INTERESTED:
+      peerState.peerInterested = false;
+      console.log('💤 Peer lost interest in us');
+      break;
 
-  case 7: // PIECE
-    {
-      if (data.length < 13) {
-        console.warn(`⚠️ Piece message too short: length=${data.length}`);
-        return;
-      }
+    case MESSAGE_IDS.HAVE:
+      {
+        const { pieceIndex } = payload;
+        peerState.bitfield[pieceIndex] = 1;
 
-      const index = data.readUInt32BE(5);
-      const begin = data.readUInt32BE(9);
-      const block = data.slice(13);
-
-      pieceManager.saveBlock(index, begin, block);
-      peerState.inFlight.delete(`${index}:${begin}`); // block received, free the slot
-
-      if (pieceManager.isPieceComplete(index)) {
-        const pieceBuffer = pieceManager.assemblePiece(index);
-        if (pieceManager.verifyPiece(index, pieceBuffer)) {
-          const filePath = path.join(__dirname, '..', 'downloads', pieceManager.torrent.name);
-          fs.mkdirSync(path.dirname(filePath), { recursive: true });
-
-          const offset = index * pieceManager.pieceLength;
-          const fd = fs.openSync(filePath, 'a+');
-          fs.writeSync(fd, pieceBuffer, 0, pieceBuffer.length, offset);
-          fs.closeSync(fd);
-
-          console.log(`✅ Piece ${index} verified and saved at offset ${offset}`);
-        } else {
-          console.log(`❌ Piece ${index} failed hash check`);
-          pieceManager.resetPiece(index); // clear blocks and retry
+        if (!peerState.choked && !pieceManager.pieces[pieceIndex]?.received) {
+          const req = pieceManager.nextBlockRequest(peerState.bitfield);
+          if (req) requestBlock(socket, peerState, req.index, req.begin, req.length);
         }
       }
+      break;
 
-      const next = pieceManager.nextBlockRequest(peerState.bitfield);
-      if (!peerState.choked && next) {
-        requestBlock(socket, peerState, next.index, next.begin, next.length);
+    case MESSAGE_IDS.BITFIELD:
+      {
+        // Convert raw bitfield buffer → boolean array indexed by piece number
+        const buf      = payload.bitfield;
+        const bitfield = [];
+        for (let i = 0; i < buf.length * 8; i++) {
+          bitfield.push((buf[Math.floor(i / 8)] >> (7 - i % 8)) & 1);
+        }
+        peerState.bitfield = bitfield;
+        console.log(`🧠 Bitfield received — peer has ${bitfield.filter(Boolean).length} pieces`);
+
+        if (!peerState.choked) {
+          const req = pieceManager.nextBlockRequest(bitfield);
+          if (req) requestBlock(socket, peerState, req.index, req.begin, req.length);
+        }
       }
-    }
-    break;
+      break;
 
-  default:
-    console.log(`ℹ️ Unhandled message ID: ${messageId}`);
-    break;
+    case MESSAGE_IDS.REQUEST:
+      {
+        // A peer is asking us to upload a block — only serve if not choking them
+        const { index, begin, length } = payload;
+
+        if (peerState.amChoking || !pieceManager.pieces[index]?.received) break;
+
+        try {
+          const filePath = path.join(__dirname, '..', 'downloads', pieceManager.torrent.name);
+          const offset   = index * pieceManager.pieceLength + begin;
+          const buf      = Buffer.alloc(length);
+          const fd       = fs.openSync(filePath, 'r');
+          fs.readSync(fd, buf, 0, length, offset);
+          fs.closeSync(fd);
+          sendPiece(socket, index, begin, buf);
+          console.log(`📤 Served piece ${index}+${begin} (${length}B)`);
+        } catch (e) {
+          console.warn(`⚠️ Could not serve piece ${index}: ${e.message}`);
+        }
+      }
+      break;
+
+    case MESSAGE_IDS.CANCEL:
+      // Peer cancelled a previous REQUEST — nothing to do since we serve synchronously
+      break;
+
+    case MESSAGE_IDS.PIECE:
+      {
+        const { index, begin, block } = payload;
+
+        // Track bytes received for tit-for-tat scoring
+        peerState.downloadedFromPeer += block.length;
+
+        pieceManager.saveBlock(index, begin, block);
+        peerState.inFlight.delete(`${index}:${begin}`);
+
+        if (pieceManager.isPieceComplete(index)) {
+          const pieceBuffer = pieceManager.assemblePiece(index);
+
+          if (pieceManager.verifyPiece(index, pieceBuffer)) {
+            const filePath = path.join(__dirname, '..', 'downloads', pieceManager.torrent.name);
+            fs.mkdirSync(path.dirname(filePath), { recursive: true });
+            const fd = fs.openSync(filePath, 'a+');
+            fs.writeSync(fd, pieceBuffer, 0, pieceBuffer.length, index * pieceManager.pieceLength);
+            fs.closeSync(fd);
+            console.log(`✅ Piece ${index} verified and saved`);
+          } else {
+            console.warn(`❌ Piece ${index} hash mismatch — resetting`);
+            pieceManager.resetPiece(index);
+          }
+        }
+
+        // Keep the request pipeline full
+        if (!peerState.choked) {
+          const next = pieceManager.nextBlockRequest(peerState.bitfield);
+          if (next) requestBlock(socket, peerState, next.index, next.begin, next.length);
+        }
+      }
+      break;
+
+    default:
+      // Silently ignore unknown message types (e.g. BEP 10 extension messages)
+      break;
+  }
 }
 
-}
+// ─── Exported handler ─────────────────────────────────────────────────────────
 
 module.exports = function handlePeerWire(socket, data, pieceManager, peerState) {
+  // Initialise reassembly buffer for this socket
+  if (!socketBuffers.has(socket)) socketBuffers.set(socket, Buffer.alloc(0));
 
-  // 1. Get or create this socket's buffer
-  if (!socketBuffers.has(socket)) {
-    socketBuffers.set(socket, Buffer.alloc(0));
-  }
-
-  // 2. Append new data to the buffer
   socketBuffers.set(socket, Buffer.concat([socketBuffers.get(socket), data]));
-
-  // 3. Clean up buffer when socket closes
   socket.once('close', () => socketBuffers.delete(socket));
 
-  // 4. Process all complete messages in the buffer
   let buf = socketBuffers.get(socket);
 
-  while (true) {
-    // Need at least 4 bytes to read the length prefix
-    if (buf.length < 4) break;
+  while (buf.length >= 4) {
+    const msgLen = buf.readUInt32BE(0);
+    if (msgLen === 0) { buf = buf.slice(4); continue; } // keep-alive
+    if (buf.length < 4 + msgLen) break;                 // wait for more data
 
-    const messageLength = buf.readUInt32BE(0);
-
-    // Keep-alive message (length = 0) — skip it
-    if (messageLength === 0) {
-      buf = buf.slice(4);
-      continue;
-    }
-
-    // Check if the full message has arrived yet
-    if (buf.length < 4 + messageLength) break;
-
-    // Extract the complete message
-    const message = buf.slice(0, 4 + messageLength);
-    buf = buf.slice(4 + messageLength);  // remove from buffer
-
-    // Process this single message
-    processSingleMessage(socket, message, pieceManager, peerState);
-
+    processSingleMessage(socket, buf.slice(0, 4 + msgLen), pieceManager, peerState);
+    buf = buf.slice(4 + msgLen);
   }
 
-  // Save remaining incomplete data back
   socketBuffers.set(socket, buf);
 };

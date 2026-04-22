@@ -49,8 +49,9 @@ app.post('/api/peers', (req, res) => {
 
       getPeers(parsed, peers => {
         res.json({ peers });
+        // Pass tracker peers directly to the downloader so it can connect immediately
+        startDownload(savePath, peers);
       });
-      startDownload(savePath);
     } catch (err) {
       console.error("Error communicating with tracker:", err);
       res.status(500).json({ error: err.message });
