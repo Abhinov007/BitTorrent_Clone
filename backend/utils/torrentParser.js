@@ -21,16 +21,19 @@ function parseTorrent(filePath) {
   const infoHashBuffer = sha1(infoBuffer);
   const infoHashHex = infoHashBuffer.toString("hex");
 
-  // Extract announce URL
+  // Extract announce URL and full tracker list
   let announce = '';
-  if (torrent['announce']) {
-    announce = torrent['announce'].toString();
-  } else if (torrent['announce-list']) {
-    const announceList = torrent['announce-list'];
-    if (Array.isArray(announceList) && announceList.length > 0 && announceList[0].length > 0) {
-      announce = announceList[0][0].toString();
-    }
+  const trackers = [];
+  if (torrent['announce-list']) {
+    torrent['announce-list'].forEach(tier =>
+      tier.forEach(t => { const url = t.toString(); trackers.push(url); })
+    );
+    if (trackers.length > 0) announce = trackers[0];
   }
+  if (!announce && torrent['announce']) {
+    announce = torrent['announce'].toString();
+  }
+  if (announce && !trackers.includes(announce)) trackers.unshift(announce);
 
   // Handle multi-file or single-file torrent
   const files = [];
@@ -50,6 +53,7 @@ function parseTorrent(filePath) {
 
   return {
     announce,
+    trackers,
     infoHash: infoHashHex,
     infoHashBuffer,
     peerId: generatePeerId(),

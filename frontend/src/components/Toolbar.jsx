@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-export default function Toolbar({ onSearch, searching }) {
+export default function Toolbar({ onSearch, searching, isPaused, onPause, onResume, hasDownload, onDelete }) {
   const [query, setQuery] = useState('');
 
   function handleSubmit(e) {
@@ -27,9 +27,24 @@ export default function Toolbar({ onSearch, searching }) {
       </div>
 
       {/* Toolbar action buttons */}
-      <button style={btnStyle} title="Resume">▶</button>
-      <button style={btnStyle} title="Pause">⏹</button>
-      <button style={btnStyle} title="Delete">🗑</button>
+      <button
+        onClick={onResume}
+        disabled={!hasDownload || !isPaused}
+        title="Resume"
+        style={{ ...btnStyle, ...(hasDownload && isPaused ? activeGreen : disabledStyle) }}
+      >▶</button>
+      <button
+        onClick={onPause}
+        disabled={!hasDownload || isPaused}
+        title="Pause"
+        style={{ ...btnStyle, ...(hasDownload && !isPaused ? activeOrange : disabledStyle) }}
+      >⏸</button>
+      <button
+        onClick={onDelete}
+        disabled={!hasDownload}
+        title="Delete"
+        style={{ ...btnStyle, ...(hasDownload ? activeRed : disabledStyle) }}
+      >🗑</button>
 
       <div style={{ flex: 1 }} />
 
@@ -89,3 +104,8 @@ const btnStyle = {
   color: '#6b7280',
   transition: 'all 0.15s',
 };
+
+const activeGreen  = { background: '#dcfce7', borderColor: '#86efac', color: '#16a34a', cursor: 'pointer' };
+const activeOrange = { background: '#fef9c3', borderColor: '#fde047', color: '#92400e', cursor: 'pointer' };
+const activeRed    = { background: '#fee2e2', borderColor: '#fca5a5', color: '#dc2626', cursor: 'pointer' };
+const disabledStyle = { opacity: 0.35, cursor: 'not-allowed' };

@@ -18,7 +18,7 @@ function Stat({ label, value, highlight }) {
   );
 }
 
-export default function StatsPanel({ activeName }) {
+export default function StatsPanel({ activeName, onPausedChange }) {
   const [stats, setStats]     = useState(null);
   const [offline, setOffline] = useState(false);
 
@@ -26,12 +26,15 @@ export default function StatsPanel({ activeName }) {
     let id;
     async function poll() {
       try {
-        setStats(await getStatus());
+        const s = await getStatus();
+        setStats(s);
         setOffline(false);
-        id = setTimeout(poll, 2000);       // normal: poll every 2s
+        // Keep App's isPaused state in sync with what the server reports
+        if (onPausedChange && s.paused !== undefined) onPausedChange(s.paused);
+        id = setTimeout(poll, 2000);
       } catch {
         setOffline(true);
-        id = setTimeout(poll, 10000);      // offline: back off to 10s
+        id = setTimeout(poll, 10000);
       }
     }
     poll();

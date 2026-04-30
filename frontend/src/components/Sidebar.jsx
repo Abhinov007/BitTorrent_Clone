@@ -43,7 +43,9 @@ function NavItem({ item, active, onClick }) {
   );
 }
 
-export default function Sidebar({ activeNav, onNav }) {
+export default function Sidebar({ activeNav, onNav, activeView }) {
+  // Support both old activeNav prop and new unified activeView prop
+  const current = activeView ?? activeNav;
   return (
     <aside style={{
       width: 200,
@@ -78,7 +80,7 @@ export default function Sidebar({ activeNav, onNav }) {
           Torrents
         </div>
         {NAV.map(item => (
-          <NavItem key={item.id} item={item} active={activeNav === item.id} onClick={onNav} />
+          <NavItem key={item.id} item={item} active={current === item.id} onClick={onNav} />
         ))}
       </div>
 
@@ -88,7 +90,7 @@ export default function Sidebar({ activeNav, onNav }) {
           Details
         </div>
         {DETAILS.map(item => (
-          <NavItem key={item.id} item={item} active={false} onClick={() => {}} />
+          <NavItem key={item.id} item={item} active={current === item.id} onClick={onNav} />
         ))}
       </div>
 

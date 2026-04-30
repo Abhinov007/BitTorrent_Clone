@@ -2,6 +2,7 @@ const fs   = require('fs');
 const path = require('path');
 const { parseMessage, MESSAGE_IDS } = require('../messagePeer');
 const { sendPiece }                  = require('../utils/peerMessage');
+const downloadState                  = require('../utils/downloadState');
 
 // How many block requests to keep in-flight per peer at once.
 // Pipelining is critical for download speed — with only 1 in-flight request
@@ -29,6 +30,7 @@ function requestBlock(socket, peerState, index, begin, length) {
 
 // Fill the request pipeline up to PIPELINE_SIZE outstanding requests.
 function fillPipeline(socket, peerState, pieceManager) {
+  if (downloadState.isPaused) return;
   while (peerState.inFlight.size < PIPELINE_SIZE) {
     const req = pieceManager.nextBlockRequest(peerState.bitfield);
     if (!req) break;
@@ -38,7 +40,9 @@ function fillPipeline(socket, peerState, pieceManager) {
 
 // ─── Per-socket TCP reassembly ────────────────────────────────────────────────
 
-const socketBuffers = new Map();
+const socketBuffers    = new Map();
+// Tracks peerState + pieceManager per socket so refillAll() can resume them.
+const socketPeerStates = new Map();
 
 // ─── Single message handler ───────────────────────────────────────────────────
 
@@ -171,12 +175,16 @@ function processSingleMessage(socket, rawMsg, pieceManager, peerState) {
 
 // ─── Exported handler ─────────────────────────────────────────────────────────
 
-module.exports = function handlePeerWire(socket, data, pieceManager, peerState) {
+function handlePeerWire(socket, data, pieceManager, peerState) {
   // Initialise reassembly buffer for this socket — register the cleanup handler
   // only once so we don't pile up hundreds of once() listeners (one per data chunk).
   if (!socketBuffers.has(socket)) {
     socketBuffers.set(socket, Buffer.alloc(0));
-    socket.once('close', () => socketBuffers.delete(socket));
+    socketPeerStates.set(socket, { peerState, pieceManager });
+    socket.once('close', () => {
+      socketBuffers.delete(socket);
+      socketPeerStates.delete(socket);
+    });
   }
 
   socketBuffers.set(socket, Buffer.concat([socketBuffers.get(socket), data]));
@@ -193,4 +201,13 @@ module.exports = function handlePeerWire(socket, data, pieceManager, peerState) 
   }
 
   socketBuffers.set(socket, buf);
+}
+
+// Refill request pipelines for every connected peer — called after resume.
+handlePeerWire.refillAll = function() {
+  for (const [socket, { peerState, pieceManager }] of socketPeerStates) {
+    if (!peerState.choked) fillPipeline(socket, peerState, pieceManager);
+  }
 };
+
+module.exports = handlePeerWire;

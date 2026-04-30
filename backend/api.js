@@ -1,10 +1,10 @@
 const express = require('express');
 const fileUpload = require('express-fileupload');
 const parseTorrent = require('./utils/torrentParser');
-const getPeers = require('./utils/tracker');
+const getTrackerPeers = require('./utils/tracker');
 const path = require('path');
 const fs = require('fs');
-const { startDownload, getStats } = require('./server');
+const { startDownload, getStats, getPeers, pauseDownload, resumeDownload, deleteDownload } = require('./server');
 const { magnetToTorrent } = require('./utils/magnetHandler');
 const crypto = require('crypto');
 const { PORT, UPLOAD_PATH, DOWNLOAD_PATH, PROWLARR_URL, PROWLARR_API_KEY, SEARCH_LIMIT } = require('./config');
@@ -27,6 +27,26 @@ app.get('/api/status', (req, res) => {
   res.json(getStats());
 });
 
+app.post('/api/download/pause', (req, res) => {
+  pauseDownload();
+  res.json({ message: 'Download paused' });
+});
+
+app.post('/api/download/resume', (req, res) => {
+  resumeDownload();
+  res.json({ message: 'Download resumed' });
+});
+
+app.get('/api/download/peers', (req, res) => {
+  res.json(getPeers());
+});
+
+app.post('/api/download/delete', (req, res) => {
+  const deleteFiles = req.body?.deleteFiles === true;
+  deleteDownload(deleteFiles);
+  res.json({ message: deleteFiles ? 'Download removed and files deleted' : 'Download removed' });
+});
+
 app.get('/api/peers', (req, res) => {
   res.json({ message: "Use POST /api/peers to upload a .torrent file" });
 });
@@ -47,7 +67,7 @@ app.post('/api/peers', (req, res) => {
       const parsed = parseTorrent(savePath);
       console.log("Parsed:", parsed);
 
-      getPeers(parsed, peers => {
+      getTrackerPeers(parsed, peers => {
         res.json({ peers });
         // Pass tracker peers directly to the downloader so it can connect immediately
         startDownload(savePath, peers);

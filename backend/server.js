@@ -12,6 +12,7 @@ const {
   sendUnchoke,
   sendInterested,
 } = require('./utils/peerMessage');
+const downloadState = require('./utils/downloadState');
 
 // ─── Logging ──────────────────────────────────────────────────────────────────
 const logPath = path.join(__dirname, 'logs/connections.log');
@@ -23,10 +24,15 @@ function logConnection(msg) {
 }
 
 // ─── Module-level download state ──────────────────────────────────────────────
-let activePieceManager = null;   // current torrent's piece manager
-let activePeerStatus   = [];     // [{ ip, port, attempts, connected, failed }]
-let activeConnections  = 0;
-let progressTimer      = null;   // periodic progress logging
+let activePieceManager  = null;   // current torrent's piece manager
+let activePeerStatus    = [];     // [{ ip, port, attempts, connected, failed }]
+let activeConnections   = 0;
+let progressTimer       = null;   // periodic progress logging
+let downloadSpeedBps    = 0;      // bytes/sec calculated every 5s
+let lastBytesSnapshot   = 0;
+let activeTrackers      = [];     // tracker URLs used for the current torrent
+const MAX_SPEED_SAMPLES = 60;     // 60 × 5s = 5 minutes of history
+let speedHistory        = [];     // [{ t: ms, bps: number }]
 
 // Map of socket → peerState — used by the unchoke timer
 const activePeers = new Map();
@@ -158,8 +164,9 @@ function tryNextPeer() {
         return;
       }
 
-      handshakeDone   = true;
-      peer.connected  = true;
+      handshakeDone      = true;
+      peer.connected     = true;
+      peer.peerState     = peerState; // expose for getPeers()
       sendInterested(socket); // tell peer we want pieces
 
       // Any bytes after the 68-byte handshake are real messages — pass them on
@@ -185,6 +192,7 @@ function tryNextPeer() {
     cleanedUp = true;
     releaseInFlightBlocks(peerState);
     peer.connected = false;
+    peer.peerState = null;
     activeConnections--;
     activePeers.delete(socket);
     logConnection(`🔌 ${reason} — ${peer.ip}:${peer.port} (attempts: ${peer.attempts}/${MAX_RETRIES})`);
@@ -223,6 +231,12 @@ function startDownload(torrentPathOrObject, peers = []) {
     : torrentPathOrObject;
 
   // ── Reset all state for the new download ─────────────────────────────────
+  downloadState.isPaused  = false;
+  downloadSpeedBps        = 0;
+  lastBytesSnapshot       = 0;
+  speedHistory            = [];
+  activeTrackers          = torrent.trackers || (torrent.announce ? [torrent.announce] : []);
+
   // Destroy existing sockets so the old peer connections don't linger.
   for (const [socket] of activePeers) {
     try { socket.destroy(); } catch (_) {}
@@ -248,18 +262,26 @@ function startDownload(torrentPathOrObject, peers = []) {
 
   startUnchokeTimer();
 
-  // ── Periodic progress log ─────────────────────────────────────────────────
+  // ── Periodic progress log + speed calculation ────────────────────────────
   progressTimer = setInterval(() => {
     if (!activePieceManager) return;
     const stats = activePieceManager.getDownloadedStats();
     const pieceDone = activePieceManager.pieces.filter(p => p.received).length;
     const connectedPeers = activePeerStatus.filter(p => p.connected).length;
+
+    // Calculate bytes/sec over the last 5 seconds and record history
+    downloadSpeedBps  = Math.max(0, stats.downloaded - lastBytesSnapshot) / 5;
+    lastBytesSnapshot = stats.downloaded;
+    speedHistory.push({ t: Date.now(), bps: downloadSpeedBps });
+    if (speedHistory.length > MAX_SPEED_SAMPLES) speedHistory.shift();
+
     console.log(
       `📊 Progress: ${stats.percent}% | ` +
       `${pieceDone}/${activePieceManager.totalPieces} pieces | ` +
       `${(stats.downloaded / 1048576).toFixed(2)} MB / ${(stats.total / 1048576).toFixed(2)} MB | ` +
-      `${connectedPeers} peers connected | ` +
-      `${activeConnections} active connections`
+      `${(downloadSpeedBps / 1024).toFixed(1)} KB/s | ` +
+      `${connectedPeers} peers | ` +
+      (downloadState.isPaused ? '⏸ PAUSED' : '▶ active')
     );
     if (activePieceManager.isDone()) {
       console.log(`🎉 Download complete: ${torrent.name}`);
@@ -273,15 +295,96 @@ function startDownload(torrentPathOrObject, peers = []) {
   }
 }
 
+function getPeers() {
+  return activePeerStatus.map(p => ({
+    ip:       p.ip,
+    port:     p.port,
+    connected: p.connected,
+    failed:   p.failed,
+    attempts: p.attempts,
+    choked:   p.peerState?.choked  ?? true,
+    inFlight: p.peerState?.inFlight?.size ?? 0,
+    pieces:   p.peerState?.bitfield?.filter(Boolean).length ?? 0,
+  }));
+}
+
+function deleteDownload(deleteFiles = false) {
+  // Tear down all active connections
+  for (const [socket] of activePeers) {
+    try { socket.destroy(); } catch (_) {}
+  }
+  activePeers.clear();
+  activeConnections = 0;
+
+  if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+
+  const filePath = activePieceManager
+    ? path.join(__dirname, 'downloads', activePieceManager.torrent.name)
+    : null;
+
+  // Clear all download state
+  activePieceManager = null;
+  activePeerStatus   = [];
+  activeTrackers     = [];
+  speedHistory       = [];
+  downloadSpeedBps   = 0;
+  lastBytesSnapshot  = 0;
+  downloadState.isPaused = false;
+
+  if (deleteFiles && filePath) {
+    try {
+      const fs = require('fs');
+      fs.rmSync(filePath, { recursive: true, force: true });
+      console.log(`🗑 Deleted file: ${filePath}`);
+    } catch (e) {
+      console.warn(`⚠️ Could not delete file: ${e.message}`);
+    }
+  }
+  console.log(`🗑 Download removed${deleteFiles ? ' (files deleted)' : ''}`);
+}
+
+function pauseDownload() {
+  downloadState.isPaused = true;
+  console.log('⏸ Download paused');
+}
+
+function resumeDownload() {
+  downloadState.isPaused = false;
+  console.log('▶ Download resumed');
+  handlePeerWire.refillAll();                          // kick pipelines back to life
+  for (let i = 0; i < MAX_CONNECTIONS; i++) tryNextPeer(); // fill any open slots
+}
+
 /**
  * Returns live download stats. Safe to call when no download is active.
  */
 function getStats() {
-  if (!activePieceManager) return { downloaded: 0, total: 0, percent: '0.00' };
-  return activePieceManager.getDownloadedStats();
+  if (!activePieceManager) {
+    return {
+      downloaded: 0, total: 0, percent: '0.00',
+      name: null, paused: false, speedBps: 0,
+      connectedPeers: 0, totalPeers: 0,
+      piecesComplete: 0, totalPieces: 0,
+      downloadPath: null, trackers: [],
+    };
+  }
+  const base = activePieceManager.getDownloadedStats();
+  return {
+    ...base,
+    name:           activePieceManager.torrent.name,
+    paused:         downloadState.isPaused,
+    speedBps:       downloadSpeedBps,
+    connectedPeers: activePeerStatus.filter(p => p.connected).length,
+    totalPeers:     activePeerStatus.length,
+    piecesComplete: activePieceManager.pieces.filter(p => p.received).length,
+    totalPieces:    activePieceManager.totalPieces,
+    downloadPath:   path.join('downloads', activePieceManager.torrent.name),
+    trackers:       activeTrackers,
+    speedHistory,
+  };
 }
 
-module.exports = { startDownload, getStats };
+module.exports = { startDownload, getStats, getPeers, pauseDownload, resumeDownload, deleteDownload };
 
 // ─── Entry point guard ────────────────────────────────────────────────────────
 // When run directly (`node server.js` / `nodemon server.js`), boot the HTTP API.

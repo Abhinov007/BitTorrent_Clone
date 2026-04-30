@@ -38,9 +38,31 @@ export async function downloadByHash(infoHash, title) {
 
 /**
  * Poll the current global download status.
- * Returns { downloaded, total, percent }
+ * Returns { downloaded, total, percent, name, paused, speedBps,
+ *           connectedPeers, totalPeers, piecesComplete, totalPieces,
+ *           downloadPath, trackers }
  */
 export async function getStatus() {
   const { data } = await axios.get('/api/status');
+  return data;
+}
+
+export async function getActivePeers() {
+  const { data } = await axios.get('/api/download/peers');
+  return data;
+}
+
+export async function deleteDownload(deleteFiles = false) {
+  const { data } = await axios.post('/api/download/delete', { deleteFiles });
+  return data;
+}
+
+export async function pauseDownload() {
+  const { data } = await axios.post('/api/download/pause');
+  return data;
+}
+
+export async function resumeDownload() {
+  const { data } = await axios.post('/api/download/resume');
   return data;
 }

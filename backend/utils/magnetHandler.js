@@ -658,6 +658,7 @@ function buildTorrentObject(metadataBuffer, magnetParsed) {
 
   return {
     announce:        magnetParsed.announce?.[0] || '',
+    trackers:        magnetParsed.announce     || [],
     infoHash:        magnetParsed.infoHash,
     infoHashBuffer:  Buffer.from(magnetParsed.infoHash, 'hex'),
     peerId,
