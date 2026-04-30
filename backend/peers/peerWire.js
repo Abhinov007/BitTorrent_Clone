@@ -3,6 +3,11 @@ const path = require('path');
 const { parseMessage, MESSAGE_IDS } = require('../messagePeer');
 const { sendPiece }                  = require('../utils/peerMessage');
 
+// How many block requests to keep in-flight per peer at once.
+// Pipelining is critical for download speed — with only 1 in-flight request
+// at 50ms RTT and 16KB blocks, max speed is 320KB/s. With 10 pipelined: 3.2MB/s.
+const PIPELINE_SIZE = 10;
+
 // ─── Block request helpers ────────────────────────────────────────────────────
 
 function sendRequest(socket, index, begin, length) {
@@ -20,6 +25,15 @@ function requestBlock(socket, peerState, index, begin, length) {
   if (peerState.inFlight.has(key)) return;
   peerState.inFlight.add(key);
   sendRequest(socket, index, begin, length);
+}
+
+// Fill the request pipeline up to PIPELINE_SIZE outstanding requests.
+function fillPipeline(socket, peerState, pieceManager) {
+  while (peerState.inFlight.size < PIPELINE_SIZE) {
+    const req = pieceManager.nextBlockRequest(peerState.bitfield);
+    if (!req) break;
+    requestBlock(socket, peerState, req.index, req.begin, req.length);
+  }
 }
 
 // ─── Per-socket TCP reassembly ────────────────────────────────────────────────
@@ -43,11 +57,8 @@ function processSingleMessage(socket, rawMsg, pieceManager, peerState) {
 
     case MESSAGE_IDS.UNCHOKE:
       peerState.choked = false;
-      console.log('🔓 Peer unchoked us — requesting next block');
-      {
-        const req = pieceManager.nextBlockRequest(peerState.bitfield);
-        if (req) requestBlock(socket, peerState, req.index, req.begin, req.length);
-      }
+      console.log('🔓 Peer unchoked us — filling request pipeline');
+      fillPipeline(socket, peerState, pieceManager);
       break;
 
     case MESSAGE_IDS.INTERESTED:
@@ -67,8 +78,7 @@ function processSingleMessage(socket, rawMsg, pieceManager, peerState) {
         peerState.bitfield[pieceIndex] = 1;
 
         if (!peerState.choked && !pieceManager.pieces[pieceIndex]?.received) {
-          const req = pieceManager.nextBlockRequest(peerState.bitfield);
-          if (req) requestBlock(socket, peerState, req.index, req.begin, req.length);
+          fillPipeline(socket, peerState, pieceManager);
         }
       }
       break;
@@ -85,8 +95,7 @@ function processSingleMessage(socket, rawMsg, pieceManager, peerState) {
         console.log(`🧠 Bitfield received — peer has ${bitfield.filter(Boolean).length} pieces`);
 
         if (!peerState.choked) {
-          const req = pieceManager.nextBlockRequest(bitfield);
-          if (req) requestBlock(socket, peerState, req.index, req.begin, req.length);
+          fillPipeline(socket, peerState, pieceManager);
         }
       }
       break;
@@ -133,7 +142,11 @@ function processSingleMessage(socket, rawMsg, pieceManager, peerState) {
           if (pieceManager.verifyPiece(index, pieceBuffer)) {
             const filePath = path.join(__dirname, '..', 'downloads', pieceManager.torrent.name);
             fs.mkdirSync(path.dirname(filePath), { recursive: true });
-            const fd = fs.openSync(filePath, 'a+');
+
+            // Use 'r+' (not 'a+') so the explicit byte offset is respected.
+            // 'a+' (append mode) ignores position — all writes go to end of file.
+            const fileExists = fs.existsSync(filePath);
+            const fd = fs.openSync(filePath, fileExists ? 'r+' : 'w');
             fs.writeSync(fd, pieceBuffer, 0, pieceBuffer.length, index * pieceManager.pieceLength);
             fs.closeSync(fd);
             console.log(`✅ Piece ${index} verified and saved`);
@@ -143,10 +156,9 @@ function processSingleMessage(socket, rawMsg, pieceManager, peerState) {
           }
         }
 
-        // Keep the request pipeline full
+        // Keep the request pipeline full — don't wait for more messages
         if (!peerState.choked) {
-          const next = pieceManager.nextBlockRequest(peerState.bitfield);
-          if (next) requestBlock(socket, peerState, next.index, next.begin, next.length);
+          fillPipeline(socket, peerState, pieceManager);
         }
       }
       break;
@@ -160,11 +172,14 @@ function processSingleMessage(socket, rawMsg, pieceManager, peerState) {
 // ─── Exported handler ─────────────────────────────────────────────────────────
 
 module.exports = function handlePeerWire(socket, data, pieceManager, peerState) {
-  // Initialise reassembly buffer for this socket
-  if (!socketBuffers.has(socket)) socketBuffers.set(socket, Buffer.alloc(0));
+  // Initialise reassembly buffer for this socket — register the cleanup handler
+  // only once so we don't pile up hundreds of once() listeners (one per data chunk).
+  if (!socketBuffers.has(socket)) {
+    socketBuffers.set(socket, Buffer.alloc(0));
+    socket.once('close', () => socketBuffers.delete(socket));
+  }
 
   socketBuffers.set(socket, Buffer.concat([socketBuffers.get(socket), data]));
-  socket.once('close', () => socketBuffers.delete(socket));
 
   let buf = socketBuffers.get(socket);
 

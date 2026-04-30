@@ -139,6 +139,16 @@ nextBlockRequest(bitfield) {
   }
 
   /**
+   * Releases a single in-flight block back to the request pool.
+   * Called when a peer disconnects before delivering the block.
+   */
+  releaseBlock(index, begin) {
+    const piece = this.pieces[index];
+    if (!piece || piece.received) return;
+    piece.requestedBlocks = piece.requestedBlocks.filter(b => b !== begin);
+  }
+
+  /**
    * Gets the actual byte size of a given piece index.
    */
   getPieceLength(index) {

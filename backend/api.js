@@ -134,8 +134,8 @@ app.post('/api/download/url', async (req, res) => {
     if (bodyText.startsWith('magnet:')) {
       const magnet = Buffer.from(response.data).toString('utf8').trim();
       console.log('🔁 URL resolved to magnet link, switching to DHT handler...');
-      const torrent = await magnetToTorrent(magnet);
-      startDownload(torrent);
+      const { torrent, peers } = await magnetToTorrent(magnet);
+      startDownload(torrent, peers);
       return res.json({ message: 'Download started via magnet', name: torrent.name });
     }
 
@@ -157,8 +157,8 @@ app.post('/api/download/url', async (req, res) => {
       if (magnetMatch) {
         console.log('🔁 Caught magnet redirect, switching to magnet handler...');
         try {
-          const torrent = await magnetToTorrent(magnetMatch[1]);
-          startDownload(torrent);
+          const { torrent, peers } = await magnetToTorrent(magnetMatch[1]);
+          startDownload(torrent, peers);
           return res.json({ message: 'Download started via magnet', name: torrent.name });
         } catch (magnetErr) {
           return res.status(500).json({ error: 'Magnet fallback failed: ' + magnetErr.message });
@@ -194,9 +194,9 @@ app.post('/api/download/magnet', async (req, res) => {
 
   try {
     res.json({ message: 'Fetching metadata via DHT...', magnetLink });
-    const torrent = await magnetToTorrent(magnetLink);
-    startDownload(torrent);
-    console.log(`✅ Magnet download started: ${torrent.name}`);
+    const { torrent, peers } = await magnetToTorrent(magnetLink);
+    startDownload(torrent, peers);
+    console.log(`✅ Magnet download started: ${torrent.name} with ${peers.length} peers`);
   } catch (err) {
     console.error('Magnet download error:', err.message);
   }
@@ -209,14 +209,34 @@ app.post('/api/download/hash', async (req, res) => {
     return res.status(400).json({ error: 'infoHash is required' });
   }
 
-  // Build a magnet link — use archive.org + port-80 trackers first (rarely blocked by Pi-hole)
+  // Build a magnet link with a comprehensive set of HTTP + UDP trackers.
+  // UDP trackers (udp://) are handled by the UDP tracker client in magnetHandler.js
+  // and tend to have far better peer coverage than HTTP trackers.
   const trackers = [
+    // HTTP/HTTPS — work through firewalls, never blocked
     'http://bt1.archive.org:6969/announce',
     'http://bt2.archive.org:6969/announce',
     'http://tracker.openbittorrent.com:80/announce',
+    'http://open.stealth.si:80/announce',
     'https://opentracker.i2p.rocks:443/announce',
+    'https://tracker.tamersunion.org:443/announce',
+    'https://tracker.lilithraws.org:443/announce',
+    'https://tracker.gbitt.info:443/announce',
     'http://tracker.opentrackr.org:1337/announce',
     'http://open.tracker.cl:1337/announce',
+    'http://tracker.bt4g.com:2095/announce',
+    'https://tracker.renfei.net/announce',
+    // UDP — highest coverage, used by most popular clients (μTorrent, qBittorrent…)
+    'udp://tracker.opentrackr.org:1337/announce',
+    'udp://open.tracker.cl:1337/announce',
+    'udp://tracker.openbittorrent.com:6969/announce',
+    'udp://open.stealth.si:80/announce',
+    'udp://tracker.torrent.eu.org:451/announce',
+    'udp://tracker.tiny-vps.com:6969/announce',
+    'udp://tracker.moeking.me:6969/announce',
+    'udp://exodus.desync.com:6969/announce',
+    'udp://tracker.dler.org:6969/announce',
+    'udp://retracker.lanta-net.ru:2710/announce',
   ].map(t => `&tr=${encodeURIComponent(t)}`).join('');
 
   const dn = title ? `&dn=${encodeURIComponent(title)}` : '';
@@ -226,9 +246,9 @@ app.post('/api/download/hash', async (req, res) => {
 
   try {
     res.json({ message: 'Fetching metadata via DHT...', infoHash });
-    const torrent = await magnetToTorrent(magnetLink);
-    startDownload(torrent);
-    console.log(`✅ Download started: ${torrent.name}`);
+    const { torrent, peers } = await magnetToTorrent(magnetLink);
+    startDownload(torrent, peers);
+    console.log(`✅ Download started: ${torrent.name} with ${peers.length} peers`);
   } catch (err) {
     console.error('Hash download error:', err.message);
   }

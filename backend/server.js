@@ -11,7 +11,6 @@ const {
   sendChoke,
   sendUnchoke,
   sendInterested,
-  sendNotInterested,
 } = require('./utils/peerMessage');
 
 // ─── Logging ──────────────────────────────────────────────────────────────────
@@ -27,6 +26,7 @@ function logConnection(msg) {
 let activePieceManager = null;   // current torrent's piece manager
 let activePeerStatus   = [];     // [{ ip, port, attempts, connected, failed }]
 let activeConnections  = 0;
+let progressTimer      = null;   // periodic progress logging
 
 // Map of socket → peerState — used by the unchoke timer
 const activePeers = new Map();
@@ -90,6 +90,19 @@ function startUnchokeTimer() {
   }, UNCHOKE_INTERVAL);
 }
 
+// ─── Release in-flight blocks back to the request pool ───────────────────────
+// Called when a peer disconnects before delivering all requested blocks.
+// Without this, those blocks stay permanently in piece.requestedBlocks and
+// no other peer will ever request them → download hangs.
+function releaseInFlightBlocks(peerState) {
+  if (!activePieceManager || !peerState.inFlight.size) return;
+  for (const key of peerState.inFlight) {
+    const [index, begin] = key.split(':').map(Number);
+    activePieceManager.releaseBlock(index, begin);
+  }
+  peerState.inFlight.clear();
+}
+
 // ─── Peer connection ──────────────────────────────────────────────────────────
 function tryNextPeer() {
   if (activeConnections >= MAX_CONNECTIONS) return;
@@ -122,33 +135,78 @@ function tryNextPeer() {
   // Register in the global peer map so the unchoke timer can see it
   activePeers.set(socket, peerState);
 
+  // ── Handshake consumer ────────────────────────────────────────────────────
+  // The peer's first response is a 68-byte handshake. We MUST strip it before
+  // passing data to handlePeerWire, which only understands length-prefixed
+  // messages. Feeding the handshake bytes into handlePeerWire causes it to
+  // read bytes [0-3] as a 4-byte message length (0x13426974 = 323 MB) and
+  // wait forever — the buffer fills up but no valid message boundary is
+  // ever found, so no piece is ever requested.
+  let handshakeBuf  = Buffer.alloc(0);
+  let handshakeDone = false;
+
   socket.on('data', data => {
-    if (!peer.connected) {
-      peer.connected = true;
-      sendInterested(socket); // tell peer we want to download
+    if (!handshakeDone) {
+      handshakeBuf = Buffer.concat([handshakeBuf, data]);
+      if (handshakeBuf.length < 68) return; // still assembling peer handshake
+
+      // Validate: must be a BitTorrent handshake
+      if (handshakeBuf.readUInt8(0) !== 19 ||
+          handshakeBuf.slice(1, 20).toString() !== 'BitTorrent protocol') {
+        logConnection(`❌ Invalid handshake from ${peer.ip}:${peer.port}`);
+        socket.destroy();
+        return;
+      }
+
+      handshakeDone   = true;
+      peer.connected  = true;
+      sendInterested(socket); // tell peer we want pieces
+
+      // Any bytes after the 68-byte handshake are real messages — pass them on
+      const rest = handshakeBuf.slice(68);
+      handshakeBuf = null; // free memory — no longer needed
+      if (rest.length > 0) {
+        handlePeerWire(socket, rest, activePieceManager, peerState);
+      }
+      return;
     }
+
+    // Handshake already consumed — all subsequent data is length-prefixed messages
     handlePeerWire(socket, data, activePieceManager, peerState);
   });
 
-  socket.on('error', err => {
-    logConnection(`❌ Error ${peer.ip}:${peer.port} — ${err.message}`);
-    peer.failed = true;
+  // ── Single cleanup guard ──────────────────────────────────────────────────
+  // Node.js fires 'error' → then 'close' on the same socket.
+  // Without this guard, activeConnections gets decremented twice and
+  // tryNextPeer() fires twice — corrupting the connection count.
+  let cleanedUp = false;
+  function cleanup(reason) {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    releaseInFlightBlocks(peerState);
+    peer.connected = false;
     activeConnections--;
     activePeers.delete(socket);
+    logConnection(`🔌 ${reason} — ${peer.ip}:${peer.port} (attempts: ${peer.attempts}/${MAX_RETRIES})`);
     tryNextPeer();
+  }
+
+  socket.on('error', err => {
+    // Hard failures (refused / DNS) shouldn't be retried; soft ones (timeout,
+    // reset) are fine to retry — the attempts counter limits total retries.
+    if (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND') {
+      peer.failed = true;
+    }
+    cleanup(`❌ Error: ${err.message}`);
   });
 
   socket.on('close', () => {
-    logConnection(`🔌 Closed ${peer.ip}:${peer.port}`);
-    if (peer.connected) sendNotInterested(socket); // polite goodbye
-    activeConnections--;
-    activePeers.delete(socket);
-    tryNextPeer();
+    cleanup('🔌 Closed');
   });
 
   socket.setTimeout(10000, () => {
     logConnection(`⌛ Timeout ${peer.ip}:${peer.port}`);
-    socket.destroy();
+    socket.destroy(); // triggers 'close'
   });
 }
 
@@ -164,6 +222,17 @@ function startDownload(torrentPathOrObject, peers = []) {
     ? parseTorrent(torrentPathOrObject)
     : torrentPathOrObject;
 
+  // ── Reset all state for the new download ─────────────────────────────────
+  // Destroy existing sockets so the old peer connections don't linger.
+  for (const [socket] of activePeers) {
+    try { socket.destroy(); } catch (_) {}
+  }
+  activePeers.clear();
+  activeConnections = 0;
+
+  // Stop existing progress logger
+  if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+
   activePieceManager = new PieceManager(torrent);
 
   // Normalise peer list — support both { host } and { ip } field names
@@ -178,6 +247,26 @@ function startDownload(torrentPathOrObject, peers = []) {
   console.log(`🚀 Starting download: ${torrent.name} (${activePieceManager.totalPieces} pieces, ${peers.length} peers)`);
 
   startUnchokeTimer();
+
+  // ── Periodic progress log ─────────────────────────────────────────────────
+  progressTimer = setInterval(() => {
+    if (!activePieceManager) return;
+    const stats = activePieceManager.getDownloadedStats();
+    const pieceDone = activePieceManager.pieces.filter(p => p.received).length;
+    const connectedPeers = activePeerStatus.filter(p => p.connected).length;
+    console.log(
+      `📊 Progress: ${stats.percent}% | ` +
+      `${pieceDone}/${activePieceManager.totalPieces} pieces | ` +
+      `${(stats.downloaded / 1048576).toFixed(2)} MB / ${(stats.total / 1048576).toFixed(2)} MB | ` +
+      `${connectedPeers} peers connected | ` +
+      `${activeConnections} active connections`
+    );
+    if (activePieceManager.isDone()) {
+      console.log(`🎉 Download complete: ${torrent.name}`);
+      clearInterval(progressTimer);
+      progressTimer = null;
+    }
+  }, 5000);
 
   for (let i = 0; i < MAX_CONNECTIONS; i++) {
     tryNextPeer();

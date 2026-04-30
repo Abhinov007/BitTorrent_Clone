@@ -1,29 +1,43 @@
-const net = require('net');
-const http = require('http');
-const https = require('https');
+const net    = require('net');
+const dgram  = require('dgram');
+const http   = require('http');
+const https  = require('https');
 const crypto = require('crypto');
-const DHT = require('bittorrent-dht');
+const DHT    = require('bittorrent-dht');
 const parseMagnet = require('magnet-uri');
-const bencode = require('bencode');
+const bencode     = require('bencode');
 
 const METADATA_BLOCK_SIZE = 16384;
-const MAX_PEERS_TO_TRY = 15;      // try more peers in case most are slow/unresponsive
-const DHT_LOOKUP_TIMEOUT = 60000;
-const METADATA_TIMEOUT = 30000;   // increase to 30s — some peers are slow
+const MAX_PEERS_PER_BATCH = 15;   // peers tried in parallel per metadata attempt round
+const DHT_LOOKUP_TIMEOUT  = 60000;
+const METADATA_TIMEOUT    = 10000; // 10s per peer — ETIMEDOUT peers take ~21s at OS level,
+                                   // but 10s is enough for reachable peers and fails fast
 
-// Public HTTP trackers — ordered by likelihood of working through firewalls/DNS blockers.
-// archive.org (port 6969) and port-80 trackers are rarely blocked by Pi-hole/AdGuard.
+// Public HTTP/HTTPS trackers — ordered by reliability and firewall-friendliness.
+// Port 80/443 trackers bypass most firewalls; archive.org is almost never blocked.
+// NOTE: UDP trackers (udp://) are handled separately by the UDP tracker client below.
 const FALLBACK_HTTP_TRACKERS = [
-  // Internet Archive — almost never DNS-blocked, port 6969
+  // Internet Archive — extremely reliable, port 6969
   'http://bt1.archive.org:6969/announce',
   'http://bt2.archive.org:6969/announce',
-  // Port 80 — passes through most firewalls
+  // Port 80 — passes through essentially all firewalls
   'http://tracker.openbittorrent.com:80/announce',
-  // HTTPS — port 443, very rarely blocked
+  'http://open.stealth.si:80/announce',
+  // Port 443 HTTPS — same as HTTPS web traffic, never blocked
   'https://opentracker.i2p.rocks:443/announce',
-  // Port 1337 — may be blocked on some networks, but worth trying
+  'https://tracker.tamersunion.org:443/announce',
+  'https://tracker.lilithraws.org:443/announce',
+  'https://tracker.gbitt.info:443/announce',
+  'https://tracker.yemekyedim.com:443/announce',
+  'https://tracker1.520.jp:443/announce',
+  // Common non-standard ports
   'http://tracker.opentrackr.org:1337/announce',
   'http://open.tracker.cl:1337/announce',
+  'http://tracker.bt4g.com:2095/announce',
+  'http://tracker.files.fm:6969/announce',
+  'http://tracker4.itzmx.com:2710/announce',
+  'https://tracker.renfei.net/announce',
+  'https://tracker.loligirl.cn/announce',
 ];
 
 /**
@@ -45,113 +59,128 @@ function magnetToTorrent(magnetUri) {
     }
 
     const infoHashBuffer = Buffer.from(parsed.infoHash, 'hex');
-    const trackers = parsed.announce || [];
-    const displayName = parsed.name || parsed.infoHash;
+    const trackers       = parsed.announce || [];
+    const displayName    = parsed.name || parsed.infoHash;
 
     console.log(`🧲 Magnet parsed: ${displayName}`);
     console.log(`🔑 Info hash: ${parsed.infoHash}`);
     console.log(`📡 Trackers: ${trackers.length}`);
 
-    // 2. Find peers — try HTTP trackers first, fall back to DHT
-    const allTrackers = [...(trackers.filter(t => t.startsWith('http'))), ...FALLBACK_HTTP_TRACKERS];
+    // Deduplicate tracker URLs — magnet trackers often overlap with FALLBACK list
+    const seenTrackers  = new Set();
+    const allHttpTrackers = [...trackers.filter(t => t.startsWith('http')), ...FALLBACK_HTTP_TRACKERS]
+      .filter(t => { if (seenTrackers.has(t)) return false; seenTrackers.add(t); return true; });
 
-    const MAX_ROUNDS = 3;  // how many peer-fetch + metadata-attempt rounds before giving up
-    let round = 0;
-    let triedDHT = false;
-    let usedPeers = new Set(); // avoid retrying the same peers
+    // All UDP trackers from the magnet link (common on public trackers, huge coverage)
+    const seenUdp = new Set();
+    const allUdpTrackers = trackers
+      .filter(t => t.startsWith('udp://'))
+      .filter(t => { if (seenUdp.has(t)) return false; seenUdp.add(t); return true; });
 
-    function nextRound() {
-      round++;
-      if (round > MAX_ROUNDS) {
-        return reject(new Error('Could not fetch torrent metadata after multiple attempts'));
-      }
+    console.log(`🔗 Querying ${allHttpTrackers.length} HTTP + ${allUdpTrackers.length} UDP trackers in parallel...`);
 
-      console.log(`🔄 Peer retry round ${round}/${MAX_ROUNDS}...`);
+    // ── Peer pools ────────────────────────────────────────────────────────────
+    // metadataQueue: peers waiting to be tried for BEP 9 metadata exchange.
+    //   We drain this in batches of MAX_PEERS_PER_BATCH until one succeeds.
+    //   On initial tracker response we dump ALL peers here — so if batch 1
+    //   fails (all ETIMEDOUT) we immediately try batch 2, 3, … instead of
+    //   re-querying trackers and getting the same list again.
+    const metadataQueue    = [];
+    const seenPeers        = new Set(); // dedup across all sources
+    const allDiscoveredPeers = [];      // all valid peers → passed to startDownload()
 
-      if (!triedDHT) {
-        // Re-query trackers for a fresh peer list
-        findPeersViaTrackers(infoHashBuffer, allTrackers, (freshPeers) => {
-          const newPeers = freshPeers.filter(p => !usedPeers.has(`${p.host}:${p.port}`));
-          if (newPeers.length > 0) {
-            console.log(`👥 Round ${round}: got ${newPeers.length} fresh tracker peers`);
-            proceedWithPeers(newPeers);
-          } else {
-            // No new tracker peers — try DHT
-            triedDHT = true;
-            console.log('⚠️ No new tracker peers, trying DHT...');
-            findPeersViaDHT(infoHashBuffer, (err, dhtPeers) => {
-              if (err || dhtPeers.length === 0) {
-                return reject(new Error('Could not find any peers via trackers or DHT'));
-              }
-              const newDHTPeers = dhtPeers.filter(p => !usedPeers.has(`${p.host}:${p.port}`));
-              console.log(`👥 Round ${round}: got ${newDHTPeers.length} DHT peers`);
-              proceedWithPeers(newDHTPeers.length > 0 ? newDHTPeers : dhtPeers);
-            });
-          }
-        });
-      } else {
-        // Already tried DHT, just retry with all known peers from DHT again
-        findPeersViaDHT(infoHashBuffer, (err, dhtPeers) => {
-          if (err || dhtPeers.length === 0) {
-            return reject(new Error('DHT found no peers on retry'));
-          }
-          console.log(`👥 Round ${round}: got ${dhtPeers.length} DHT peers (retry)`);
-          proceedWithPeers(dhtPeers);
-        });
-      }
+    function isValidPeer(p) {
+      const h = p.host;
+      return h && h !== '127.0.0.1' && h !== '0.0.0.0' &&
+             !h.startsWith('127.') && h !== '::1' && p.port > 0;
     }
 
-    // Kick off the first round
-    findPeersViaTrackers(infoHashBuffer, allTrackers, (trackerPeers) => {
-      if (trackerPeers.length > 0) {
-        console.log(`👥 Found ${trackerPeers.length} peers via tracker`);
-        proceedWithPeers(trackerPeers);
-      } else {
-        console.log('⚠️ No tracker peers found, falling back to DHT...');
-        triedDHT = true;
+    function enqueuePeers(peers) {
+      let added = 0;
+      for (const p of peers) {
+        if (!isValidPeer(p)) continue;
+        const key = `${p.host}:${p.port}`;
+        if (seenPeers.has(key)) continue;
+        seenPeers.add(key);
+        metadataQueue.push(p);
+        allDiscoveredPeers.push(p);
+        added++;
+      }
+      return added;
+    }
+
+    // ── Metadata batch loop ───────────────────────────────────────────────────
+    // Tries the next batch of peers from the queue. If the queue empties,
+    // falls back to DHT. If DHT also fails → reject.
+    let dhtAttempted = false;
+
+    function tryNextBatch() {
+      const batch = metadataQueue.splice(0, MAX_PEERS_PER_BATCH);
+
+      if (batch.length === 0) {
+        // Queue exhausted — try DHT if not done yet
+        if (dhtAttempted) {
+          return reject(new Error('Could not fetch torrent metadata — all peers failed'));
+        }
+        dhtAttempted = true;
+        console.log('⚠️ All tracker peers exhausted, trying DHT...');
         findPeersViaDHT(infoHashBuffer, (err, dhtPeers) => {
-          if (err || dhtPeers.length === 0) {
+          if (err || !dhtPeers || dhtPeers.length === 0) {
             return reject(new Error('Could not find any peers via trackers or DHT'));
           }
-          console.log(`👥 Found ${dhtPeers.length} peers via DHT`);
-          proceedWithPeers(dhtPeers);
+          const added = enqueuePeers(dhtPeers);
+          console.log(`👥 DHT found ${added} new peers`);
+          tryNextBatch();
         });
-      }
-    });
-
-    function proceedWithPeers(peers) {
-      // Filter out loopback/bogon peers — caused by DNS blockers redirecting tracker domains
-      peers = peers.filter(p => {
-        const h = p.host;
-        return h !== '127.0.0.1' && h !== '0.0.0.0' && !h.startsWith('127.') && h !== '::1';
-      });
-
-      if (peers.length === 0) {
-        console.warn('⚠️ All peers filtered out (DNS blocker redirecting trackers to localhost)');
-        return nextRound();
+        return;
       }
 
-      // Track which peers we've already tried
-      peers.forEach(p => usedPeers.add(`${p.host}:${p.port}`));
+      console.log(`🔌 Trying metadata batch: ${batch.length} peers (${metadataQueue.length} remaining in queue)`);
 
-      // 3. Fetch metadata from peers
-      fetchMetadataFromPeers(peers, infoHashBuffer, (err, metadata) => {
+      fetchMetadataFromPeers(batch, infoHashBuffer, (err, metadata) => {
         if (err || !metadata) {
-          console.warn(`⚠️ All peers in this batch failed — scheduling retry...`);
-          return nextRound();
+          console.warn(`⚠️ Batch failed — trying next batch...`);
+          return tryNextBatch();
         }
 
         console.log(`✅ Metadata fetched successfully`);
-
-        // 4. Build torrent object matching our parseTorrent() output shape
         try {
           const torrent = buildTorrentObject(metadata, parsed);
-          resolve(torrent);
-        } catch (err) {
-          reject(new Error('Failed to parse metadata: ' + err.message));
+          console.log(`📋 Returning ${allDiscoveredPeers.length} peers to caller for download`);
+          resolve({ torrent, peers: allDiscoveredPeers });
+        } catch (buildErr) {
+          reject(new Error('Failed to parse metadata: ' + buildErr.message));
         }
       });
     }
+
+    // ── Bootstrap: HTTP + UDP trackers in parallel, then start batch loop ─────
+    Promise.all([
+      // HTTP trackers (callback-based → wrap in Promise)
+      new Promise(res => findPeersViaTrackers(infoHashBuffer, allHttpTrackers, res)),
+      // UDP trackers (already returns Promise)
+      findPeersViaUdpTrackers(infoHashBuffer, allUdpTrackers),
+    ]).then(([httpPeers, udpPeers]) => {
+      const httpAdded = enqueuePeers(httpPeers);
+      const udpAdded  = enqueuePeers(udpPeers);
+      console.log(`👥 Found ${httpAdded} HTTP peers + ${udpAdded} UDP peers (${metadataQueue.length} total unique)`);
+
+      if (metadataQueue.length > 0) {
+        tryNextBatch();
+      } else {
+        // No tracker peers at all — go straight to DHT
+        console.log('⚠️ No tracker peers found, falling back to DHT...');
+        dhtAttempted = true;
+        findPeersViaDHT(infoHashBuffer, (err, dhtPeers) => {
+          if (err || !dhtPeers || dhtPeers.length === 0) {
+            return reject(new Error('Could not find any peers via trackers or DHT'));
+          }
+          enqueuePeers(dhtPeers);
+          console.log(`👥 DHT found ${metadataQueue.length} peers`);
+          tryNextBatch();
+        });
+      }
+    });
   });
 }
 
@@ -221,6 +250,127 @@ function findPeersViaTrackers(infoHashBuffer, trackerUrls, callback) {
 }
 
 /**
+ * Queries a single UDP tracker (BEP 15) for peers.
+ *
+ * Protocol flow:
+ *   1. Send CONNECT  request (action=0) → get connection_id
+ *   2. Send ANNOUNCE request (action=1) using connection_id → get peer list
+ *
+ * @param {string}  host
+ * @param {number}  port
+ * @param {Buffer}  infoHashBuffer
+ * @param {Buffer}  peerId
+ * @param {number}  timeoutMs
+ * @returns {Promise<Array<{host,port}>>}
+ */
+function queryUdpTracker(host, port, infoHashBuffer, peerId, timeoutMs = 6000) {
+  return new Promise((resolve) => {
+    const socket = dgram.createSocket('udp4');
+    let timer = null;
+
+    const done = (peers) => {
+      if (timer) { clearTimeout(timer); timer = null; }
+      try { socket.close(); } catch (_) {}
+      resolve(peers);
+    };
+
+    timer = setTimeout(() => done([]), timeoutMs);
+    socket.on('error', () => done([]));
+
+    // ── Step 1: CONNECT ───────────────────────────────────────────────────────
+    // Magic connection_id for initial connect request per BEP 15 spec
+    const CONNECT_MAGIC = Buffer.from('0000041727101980', 'hex'); // BigInt 0x41727101980
+    const txId = crypto.randomBytes(4);
+    const connectReq = Buffer.alloc(16);
+    CONNECT_MAGIC.copy(connectReq, 0);           // connection_id (8 bytes)
+    connectReq.writeUInt32BE(0, 8);              // action = 0 (connect)
+    txId.copy(connectReq, 12);                   // transaction_id
+
+    socket.on('message', (msg) => {
+      if (msg.length < 16) return;
+
+      const action = msg.readUInt32BE(0);
+      const rxTxId = msg.slice(4, 8);
+
+      // ── Step 2: got CONNECT response → send ANNOUNCE ──────────────────────
+      if (action === 0 && rxTxId.equals(txId)) {
+        const connectionId = msg.slice(8, 16); // 8-byte connection_id from tracker
+
+        const announceReq = Buffer.alloc(98);
+        connectionId.copy(announceReq, 0);             // connection_id
+        announceReq.writeUInt32BE(1, 8);               // action = 1 (announce)
+        crypto.randomBytes(4).copy(announceReq, 12);   // transaction_id
+        infoHashBuffer.copy(announceReq, 16);          // info_hash
+        peerId.copy(announceReq, 36);                  // peer_id
+        announceReq.writeBigInt64BE(0n, 56);           // downloaded
+        announceReq.writeBigInt64BE(BigInt(1e9), 64);  // left (fake 1 GB)
+        announceReq.writeBigInt64BE(0n, 72);           // uploaded
+        announceReq.writeUInt32BE(0, 80);              // event = 0 (none)
+        announceReq.writeUInt32BE(0, 84);              // ip = 0 (use source IP)
+        crypto.randomBytes(4).copy(announceReq, 88);   // key
+        announceReq.writeInt32BE(-1, 92);              // num_want = -1 (default, usually 50-200)
+        announceReq.writeUInt16BE(6881, 96);           // port
+
+        socket.send(announceReq, port, host, (err) => { if (err) done([]); });
+        return;
+      }
+
+      // ── Step 3: got ANNOUNCE response → parse peer list ───────────────────
+      if (action === 1 && msg.length >= 20) {
+        const peers = [];
+        // Peers start at offset 20, each 6 bytes (4 IP + 2 port)
+        for (let i = 20; i + 6 <= msg.length; i += 6) {
+          const peerHost = `${msg[i]}.${msg[i+1]}.${msg[i+2]}.${msg[i+3]}`;
+          const peerPort = msg.readUInt16BE(i + 4);
+          if (peerPort > 0) peers.push({ host: peerHost, port: peerPort });
+        }
+        done(peers);
+      }
+    });
+
+    socket.bind(0, () => {
+      socket.send(connectReq, port, host, (err) => { if (err) done([]); });
+    });
+  });
+}
+
+/**
+ * Queries all UDP trackers from the given URL list in parallel,
+ * resolves with the combined deduplicated peer list.
+ */
+async function findPeersViaUdpTrackers(infoHashBuffer, trackerUrls) {
+  const peerId = crypto.randomBytes(20);
+  const udpUrls = trackerUrls.filter(u => u.startsWith('udp://'));
+
+  if (udpUrls.length === 0) return [];
+
+  console.log(`📡 Querying ${udpUrls.length} UDP tracker(s)...`);
+
+  const results = await Promise.all(
+    udpUrls.map(url => {
+      try {
+        const parsed = new URL(url);
+        const host   = parsed.hostname;
+        const port   = parseInt(parsed.port) || 80;
+        return queryUdpTracker(host, port, infoHashBuffer, peerId).then(peers => {
+          if (peers.length > 0) console.log(`📡 UDP ${host}: ${peers.length} peers`);
+          return peers;
+        });
+      } catch (_) { return []; }
+    })
+  );
+
+  // Flatten and deduplicate
+  const seen = new Set();
+  return results.flat().filter(p => {
+    const k = `${p.host}:${p.port}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
+/**
  * Uses bittorrent-dht to discover peers for a given info hash.
  */
 function findPeersViaDHT(infoHashBuffer, callback) {
@@ -237,8 +387,8 @@ function findPeersViaDHT(infoHashBuffer, callback) {
 
   dht.on('peer', (peer) => {
     peers.push(peer);
-    console.log(`🔍 DHT found peer: ${peer.host}:${peer.port} (${peers.length}/${MAX_PEERS_TO_TRY})`);
-    if (peers.length >= MAX_PEERS_TO_TRY) finish();
+    console.log(`🔍 DHT found peer: ${peer.host}:${peer.port} (${peers.length}/${MAX_PEERS_PER_BATCH})`);
+    if (peers.length >= MAX_PEERS_PER_BATCH) finish();
   });
 
   dht.on('error', (err) => {
@@ -260,7 +410,7 @@ function findPeersViaDHT(infoHashBuffer, callback) {
  * Returns the first successful metadata buffer.
  */
 function fetchMetadataFromPeers(peers, infoHashBuffer, callback) {
-  const toTry = peers.slice(0, MAX_PEERS_TO_TRY);
+  const toTry = peers.slice(0, MAX_PEERS_PER_BATCH);
   let done = false;
   let failed = 0;
 
